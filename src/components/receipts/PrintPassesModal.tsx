@@ -1,8 +1,9 @@
-import React from 'react';
-import { QRCodeSVG } from 'qrcode.react';
-import { Printer, X, Scissors, Tent } from 'lucide-react';
+import React, { useState } from 'react';
+import { QRCodeCanvas } from 'qrcode.react';
+import { Printer, X, Scissors, Tent, FileText, Loader2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import type { Attendee } from '../../types';
+import { downloadBatchPassesPDF } from './passGenerator';
 
 interface PrintPassesModalProps {
   attendees: Attendee[] | null;
@@ -10,7 +11,8 @@ interface PrintPassesModalProps {
 }
 
 export const PrintPassesModal: React.FC<PrintPassesModalProps> = ({ attendees, onClose }) => {
-  const { settings } = useApp();
+  const { settings, showToast } = useApp();
+  const [isGeneratingPdf, setIsGeneratingPdf] = useState(false);
 
   if (!attendees || attendees.length === 0) return null;
 
@@ -18,31 +20,62 @@ export const PrintPassesModal: React.FC<PrintPassesModalProps> = ({ attendees, o
     window.print();
   };
 
+  const handleDownloadPdf = async () => {
+    try {
+      setIsGeneratingPdf(true);
+      await new Promise(r => setTimeout(r, 60));
+      downloadBatchPassesPDF(attendees, settings);
+      showToast('success', `Generated printable PDF with ${attendees.length} pass${attendees.length > 1 ? 'es' : ''}!`, 'Batch PDF');
+    } catch (err: any) {
+      console.error('Batch PDF Error:', err);
+      showToast('error', `Failed to generate PDF passes: ${err.message || err}`);
+    } finally {
+      setIsGeneratingPdf(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-xs flex flex-col items-center justify-start p-2 sm:p-6 print:p-0 print:bg-white">
       
       {/* Screen Control Bar (Hidden when printing) */}
-      <div className="no-print bg-slate-900 text-white rounded-2xl p-4 max-w-2xl w-full mb-4 shadow-xl border border-slate-800 flex items-center justify-between">
+      <div className="no-print bg-slate-900 text-white rounded-2xl p-4 max-w-2xl w-full mb-4 shadow-xl border border-slate-800 flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="font-bold text-base flex items-center space-x-2">
             <Printer className="w-5 h-5 text-teal-400" />
-            <span>Print Passes ({attendees.length} pass{attendees.length > 1 ? 'es' : ''})</span>
+            <span>Passes Generator ({attendees.length} pass{attendees.length > 1 ? 'es' : ''})</span>
           </h3>
           <p className="text-xs text-slate-400 mt-0.5">
-            Compact ticket strip format (3–4 passes per A4 sheet with cut lines).
+            Formatted as ticket strips (3 passes per A4 sheet with cut lines).
           </p>
         </div>
         <div className="flex items-center space-x-2">
           <button
-            onClick={handlePrint}
-            className="flex items-center space-x-1.5 px-4 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-sm font-bold shadow transition active:scale-95 cursor-pointer"
+            onClick={handleDownloadPdf}
+            disabled={isGeneratingPdf}
+            className="flex items-center space-x-1.5 px-3.5 py-2 bg-teal-700 hover:bg-teal-600 disabled:opacity-50 text-white rounded-xl text-xs font-bold shadow transition active:scale-95 cursor-pointer"
+            title="Download formatted A4 PDF containing all passes"
           >
-            <Printer className="w-4 h-4" />
+            {isGeneratingPdf ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <FileText className="w-4 h-4" />
+            )}
+            <span>{isGeneratingPdf ? 'Generating...' : 'Download PDF'}</span>
+          </button>
+
+          <button
+            onClick={handlePrint}
+            className="flex items-center space-x-1.5 px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-white rounded-xl text-xs font-bold border border-slate-700 shadow transition active:scale-95 cursor-pointer"
+            title="Open browser print dialog"
+          >
+            <Printer className="w-4 h-4 text-teal-400" />
             <span>Print Now</span>
           </button>
+
           <button
             onClick={onClose}
             className="p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition cursor-pointer"
+            aria-label="Close"
           >
             <X className="w-5 h-5" />
           </button>
@@ -110,13 +143,15 @@ export const PrintPassesModal: React.FC<PrintPassesModalProps> = ({ attendees, o
                 </div>
               </div>
 
-              {/* Right Column: High-contrast QR Code */}
+              {/* Right Column: High-contrast QR Code Canvas */}
               <div className="flex-shrink-0 flex flex-col items-center justify-center p-2 bg-slate-50 border border-slate-200 rounded-lg">
-                <QRCodeSVG
+                <QRCodeCanvas
+                  id={`batch-qr-${attendee.registrationId}`}
                   value={attendee.verificationToken || attendee.registrationId}
                   size={100}
                   level="M"
                   includeMargin={true}
+                  className="rounded"
                 />
                 <span className="text-[9px] font-bold text-slate-600 mt-1 uppercase tracking-tight">
                   Scan at Gate

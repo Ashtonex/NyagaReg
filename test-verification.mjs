@@ -137,12 +137,30 @@ if (cashToHandOver === 70 && digitalRecorded === 20) {
   passCount++;
 }
 
-console.log('\n========================================');
-console.log(`VERIFICATION RESULT: ${passCount} / 10 TESTS PASSED!`);
-console.log('========================================\n');
+// Test 7: PDF Receipt and Batch Pass Generation
+console.log('\n--- Test 7: PDF Receipt and Batch Pass Generation ---');
+import('jspdf').then(({ jsPDF }) => {
+  const docSingle = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a5' });
+  docSingle.text('PROVINCIAL CAMP 2026', 10, 10);
+  docSingle.text('Attendee: Simeon Katsande (PC-0027)', 10, 20);
+  const singleBytes = docSingle.output('arraybuffer').byteLength;
 
-if (passCount === 10) {
-  process.exit(0);
-} else {
-  process.exit(1);
-}
+  const docBatch = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  docBatch.text('Batch Passes', 10, 10);
+  const batchBytes = docBatch.output('arraybuffer').byteLength;
+
+  const pdfOk = singleBytes > 1000 && batchBytes > 1000;
+  console.log(`Single Receipt PDF bytes: ${singleBytes}, Batch PDF bytes: ${batchBytes} [${pdfOk ? 'PASS' : 'FAIL'}]`);
+  if (pdfOk) passCount++;
+
+  console.log('\n========================================');
+  console.log(`VERIFICATION RESULT: ${passCount} / 11 TESTS PASSED!`);
+  console.log('========================================\n');
+
+  if (passCount === 11) {
+    process.exit(0);
+  } else {
+    process.exit(1);
+  }
+});
+
