@@ -3,10 +3,11 @@ import { QRCodeSVG } from 'qrcode.react';
 import { 
   X, 
   Printer, 
-  Share2, 
   CheckCircle, 
   Tent, 
-  ExternalLink 
+  Copy, 
+  Smartphone,
+  Globe
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import type { Attendee } from '../../types';
@@ -23,36 +24,73 @@ export const EReceiptModal: React.FC<EReceiptModalProps> = ({ attendee, onClose,
 
   if (!attendee) return null;
 
-  const handleShareWhatsApp = () => {
-    const text = `*${settings.campName}*\n*REGISTRATION CONFIRMED*\n\n` +
+  const getReceiptText = () => {
+    return (
+      `*${settings.campName}*\n` +
+      `*REGISTRATION CONFIRMED*\n\n` +
       `Attendee: *${attendee.fullName}*\n` +
       `Registration ID: *${attendee.registrationId}*\n` +
       `Amount Paid: *US$${attendee.amountPaid.toFixed(2)}*\n` +
       `Payment Status: *${attendee.paymentStatus}*\n` +
       (attendee.balance > 0 ? `Outstanding Balance: *US$${attendee.balance.toFixed(2)}*\n` : '') +
       `Venue: *${settings.venue}*\n\n` +
-      `*Present this QR code at camp check-in.*\n` +
-      `_Transport and optional activities are separate from the standard camp fee._`;
-
-    const encoded = encodeURIComponent(text);
-    const cleanPhone = attendee.phoneNumber ? attendee.phoneNumber.replace(/[^0-9]/g, '') : '';
-    const url = cleanPhone ? `https://wa.me/${cleanPhone}?text=${encoded}` : `https://wa.me/?text=${encoded}`;
-    window.open(url, '_blank');
+      `*Present this registration ID at camp check-in.*\n` +
+      `_Transport and optional activities are separate from the standard camp fee._`
+    );
   };
 
-  const handleNativeShare = async () => {
-    if (navigator.share) {
-      try {
-        await navigator.share({
-          title: `${settings.campName} - ${attendee.registrationId}`,
-          text: `PROVINCIAL CAMP 2026 - REGISTRATION CONFIRMED\n\n${attendee.fullName} (${attendee.registrationId})\nAmount Paid: US$${attendee.amountPaid.toFixed(2)}\nStatus: ${attendee.paymentStatus}\nVenue: ${settings.venue}\n\nPresent this QR code at camp check-in.\nTransport and optional activities are separate from the standard camp fee.`,
-        });
-        showToast('success', 'Pass shared successfully');
-      } catch (err) {
-        // User cancelled share
-      }
-    } else {
-      handleShareWhatsApp();
+  const getCleanPhone = () => {
+    if (!attendee.phoneNumber) return '';
+    let digits = attendee.phoneNumber.replace(/\D/g, '');
+    // Zimbabwean local phone conversion e.g. 0771234567 -> 263771234567
+    if (digits.startsWith('0')) {
+      digits = '263' + digits.slice(1);
+    }
+    return digits;
+  };
+
+  // Open WhatsApp Web directly (web.whatsapp.com)
+  const handleOpenWhatsAppWeb = () => {
+    const text = getReceiptText();
+    const encoded = encodeURIComponent(text);
+    const phone = getCleanPhone();
+    const url = phone
+      ? `https://web.whatsapp.com/send?phone=${phone}&text=${encoded}`
+      : `https://web.whatsapp.com/send?text=${encoded}`;
+    window.open(url, '_blank', 'noopener,noreferrer');
+    showToast('info', 'Opening WhatsApp Web in new tab...', 'WhatsApp Web');
+  };
+
+  // Open native WhatsApp Application (whatsapp:// or fallback to api.whatsapp.com)
+  const handleOpenWhatsAppApp = () => {
+    const text = getReceiptText();
+    const encoded = encodeURIComponent(text);
+    const phone = getCleanPhone();
+    
+    // Scheme for WhatsApp application on Windows / Mac / Android / iOS
+    const appUrl = phone
+      ? `whatsapp://send?phone=${phone}&text=${encoded}`
+      : `whatsapp://send?text=${encoded}`;
+
+    const fallbackUrl = phone
+      ? `https://api.whatsapp.com/send?phone=${phone}&text=${encoded}`
+      : `https://api.whatsapp.com/send?text=${encoded}`;
+
+    try {
+      window.location.href = appUrl;
+      showToast('info', 'Launching WhatsApp application...', 'WhatsApp App');
+    } catch (e) {
+      window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
+    }
+  };
+
+  // Copy plain text receipt to clipboard
+  const handleCopyReceiptText = async () => {
+    try {
+      await navigator.clipboard.writeText(getReceiptText());
+      showToast('success', 'E-Receipt text copied to clipboard! Paste into WhatsApp or SMS.', 'Copied');
+    } catch (e) {
+      showToast('error', 'Could not copy text to clipboard.');
     }
   };
 
@@ -76,7 +114,7 @@ export const EReceiptModal: React.FC<EReceiptModalProps> = ({ attendee, onClose,
           </div>
           <button
             onClick={onClose}
-            className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition"
+            className="p-1 rounded-lg hover:bg-slate-800 text-slate-400 hover:text-white transition cursor-pointer"
           >
             <X className="w-5 h-5" />
           </button>
@@ -108,35 +146,34 @@ export const EReceiptModal: React.FC<EReceiptModalProps> = ({ attendee, onClose,
             <div className="text-xs text-slate-500">
               {attendee.churchAssembly}
             </div>
+            <div className="text-xs font-mono text-slate-400">
+              {attendee.phoneNumber}
+            </div>
           </div>
 
-          {/* Payment Details Box */}
-          <div className="bg-slate-50 border border-slate-200/80 rounded-xl p-3 text-xs space-y-1.5">
-            <div className="flex justify-between items-center text-slate-600">
+          {/* Financial summary box */}
+          <div className="bg-slate-50 rounded-xl p-3 border border-slate-200 text-xs space-y-1">
+            <div className="flex justify-between text-slate-600">
               <span>Amount Paid:</span>
-              <span className="font-bold text-slate-900 text-sm">US${attendee.amountPaid.toFixed(2)}</span>
+              <strong className="text-emerald-700 font-bold font-mono">
+                US${attendee.amountPaid.toFixed(2)}
+              </strong>
+            </div>
+            <div className="flex justify-between text-slate-600">
+              <span>Payment Status:</span>
+              <strong className="text-slate-900 font-bold">
+                {attendee.paymentStatus}
+              </strong>
             </div>
             {attendee.balance > 0 && (
-              <div className="flex justify-between items-center text-amber-700 font-medium">
-                <span>Outstanding Balance:</span>
-                <span className="font-bold">US${attendee.balance.toFixed(2)}</span>
+              <div className="flex justify-between text-amber-700 font-semibold pt-1 border-t border-slate-200">
+                <span>Balance Due:</span>
+                <span className="font-mono font-bold">US${attendee.balance.toFixed(2)}</span>
               </div>
             )}
-            <div className="flex justify-between items-center pt-1 border-t border-slate-200">
-              <span className="text-slate-500">Payment Status:</span>
-              <span className={`font-black uppercase tracking-wider text-[11px] px-2 py-0.5 rounded ${
-                attendee.paymentStatus === 'Paid / Confirmed' 
-                  ? 'bg-emerald-600 text-white' 
-                  : attendee.paymentStatus === 'Part Paid' 
-                    ? 'bg-amber-500 text-white' 
-                    : 'bg-rose-600 text-white'
-              }`}>
-                {attendee.paymentStatus}
-              </span>
-            </div>
           </div>
 
-          {/* Safe Random QR Code Token */}
+          {/* Safe QR code - contains ONLY random verification token or ID */}
           <div className="flex flex-col items-center justify-center p-3 bg-white border border-slate-200 rounded-xl shadow-xs">
             <QRCodeSVG
               value={attendee.verificationToken || attendee.registrationId}
@@ -157,29 +194,55 @@ export const EReceiptModal: React.FC<EReceiptModalProps> = ({ attendee, onClose,
           </div>
         </div>
 
-        {/* Action Buttons */}
-        <div className="p-4 bg-slate-50 border-t border-slate-200 grid grid-cols-2 gap-2">
-          <button
-            onClick={handleShareWhatsApp}
-            className="flex items-center justify-center space-x-1.5 py-2.5 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow transition active:scale-95 cursor-pointer"
-          >
-            <Share2 className="w-3.5 h-3.5" />
-            <span>Send WhatsApp</span>
-          </button>
-          <button
-            onClick={handlePrintSingle}
-            className="flex items-center justify-center space-x-1.5 py-2.5 px-3 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold shadow transition active:scale-95 cursor-pointer"
-          >
-            <Printer className="w-3.5 h-3.5" />
-            <span>Print Pass</span>
-          </button>
-          <button
-            onClick={handleNativeShare}
-            className="col-span-2 flex items-center justify-center space-x-1.5 py-2 px-3 border border-slate-300 hover:bg-white text-slate-700 rounded-xl text-xs font-semibold transition cursor-pointer"
-          >
-            <ExternalLink className="w-3.5 h-3.5" />
-            <span>Share Receipt / Pass</span>
-          </button>
+        {/* WhatsApp & Print Actions */}
+        <div className="p-4 bg-slate-50 border-t border-slate-200 space-y-2">
+          
+          <div className="text-[11px] font-bold uppercase tracking-wider text-slate-500 text-center">
+            Share E-Receipt / Pass
+          </div>
+
+          {/* WhatsApp Web & Native App Buttons */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={handleOpenWhatsAppWeb}
+              className="flex items-center justify-center space-x-1.5 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer"
+              title="Open directly in WhatsApp Web in browser"
+            >
+              <Globe className="w-3.5 h-3.5" />
+              <span>WhatsApp Web</span>
+            </button>
+
+            <button
+              onClick={handleOpenWhatsAppApp}
+              className="flex items-center justify-center space-x-1.5 py-2 px-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer"
+              title="Open in WhatsApp desktop or mobile application"
+            >
+              <Smartphone className="w-3.5 h-3.5" />
+              <span>WhatsApp App</span>
+            </button>
+          </div>
+
+          {/* Copy Text & Print Pass Buttons */}
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              onClick={handleCopyReceiptText}
+              className="flex items-center justify-center space-x-1.5 py-2 px-3 bg-white hover:bg-slate-100 border border-slate-300 text-slate-700 rounded-xl text-xs font-semibold transition active:scale-95 cursor-pointer"
+              title="Copy receipt message text to clipboard"
+            >
+              <Copy className="w-3.5 h-3.5 text-slate-500" />
+              <span>Copy Text</span>
+            </button>
+
+            <button
+              onClick={handlePrintSingle}
+              className="flex items-center justify-center space-x-1.5 py-2 px-3 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer"
+              title="Print single pass"
+            >
+              <Printer className="w-3.5 h-3.5" />
+              <span>Print Pass</span>
+            </button>
+          </div>
+
         </div>
 
       </div>

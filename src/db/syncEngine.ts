@@ -1,6 +1,9 @@
 import * as XLSX from 'xlsx';
-import type { Attendee, AuditEvent, DatabaseBackup, PaymentTransaction, SyncDeltaPack } from '../types';
-import { computePaymentStatus, createVerificationToken, db, getSettings, logAuditEvent } from './db';
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
+import type { Attendee, AuditEvent, DatabaseBackup, PaymentTransaction, SyncDeltaPack, UserAccount } from '../types';
+import { computePaymentStatus, createVerificationToken, db, getSettings, logAuditEvent, syncPersistentJsonDb } from './db';
+
 
 export interface SyncMergeResult {
   attendeesAdded: number;
@@ -249,8 +252,10 @@ export async function restoreDatabaseBackup(backup: DatabaseBackup): Promise<voi
     }
   });
 
+  await syncPersistentJsonDb();
   await logAuditEvent('Backup restored', `Restored database backup from ${backup.timestamp}. Total attendees: ${backup.attendees.length}`);
 }
+
 
 /**
  * Export attendees to Google Sheets compatible XLSX or CSV.
@@ -426,3 +431,449 @@ export function downloadBlob(blob: Blob, filename: string): void {
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
 }
+
+/**
+ * Downloads the full database as a portable camp_database.json file.
+ */
+export async function downloadJsonDatabaseFile(): Promise<void> {
+  const backup = await createDatabaseBackup();
+  const jsonStr = JSON.stringify(backup, null, 2);
+  const blob = new Blob([jsonStr], { type: 'application/json' });
+  const dateStr = new Date().toISOString().slice(0, 10);
+  downloadBlob(blob, `camp_database_${dateStr}.json`);
+}
+
+/**
+ * Restores the complete database from an uploaded JSON database file.
+ */
+export async function restoreJsonDatabaseFromFile(file: File): Promise<number> {
+  const text = await file.text();
+  const backup = JSON.parse(text);
+  await restoreDatabaseBackup(backup);
+  return backup.attendees?.length || 0;
+}
+
+/**
+ * Exports the complete database into a multi-sheet Excel file (.xlsx)
+ * Sheets: Attendees, Payment Ledger, Registrar Breakdown, Camp Summary
+ */
+export async function exportFullExcelDatabase(): Promise<void> {
+  const settings = await getSettings();
+  const attendees = await db.attendees.toArray();
+  const payments = await db.payments.toArray();
+  const auditLogs = await db.auditLogs.toArray();
+
+  const workbook = XLSX.utils.book_new();
+
+  // 1. Attendees Sheet
+  const attendeeRows = attendees.map(a => ({
+    'Reg ID': a.registrationId,
+    'Full Name': a.fullName,
+    'Gender': a.gender,
+    'Age': a.age,
+    'Phone': a.phoneNumber,
+    'Church': a.churchAssembly,
+    'District': a.districtZone || '',
+    'Amount Due ($)': a.amountDue,
+    'Amount Paid ($)': a.amountPaid,
+    'Balance ($)': a.balance,
+    'Payment Status': a.paymentStatus,
+    'Registered By': a.registeredBy,
+    'Registration Date': a.registrationDate ? a.registrationDate.slice(0, 10) : '',
+    'Check-In Status': a.checkInStatus,
+    'Check-In Date': a.checkInDate || '',
+    'Checked In By': a.checkedInBy || '',
+    'Emergency Contact': a.emergencyContactName,
+    'Emergency Phone': a.emergencyContactPhone,
+    'Dietary': a.dietaryRequirements || '',
+    'Allergies': a.allergies || '',
+    'Transport': a.transportRequired ? 'Yes' : 'No',
+    'Registration Status': a.registrationStatus
+  }));
+  const wsAttendees = XLSX.utils.json_to_sheet(attendeeRows);
+  XLSX.utils.book_append_sheet(workbook, wsAttendees, 'Attendees');
+
+  // 2. Payments Ledger Sheet
+  const paymentRows = payments.map(p => ({
+    'Transaction ID': p.id.slice(0, 8),
+    'Reg ID': p.registrationId,
+    'Amount ($)': p.amount,
+    'Payment Date': p.paymentDateTime ? p.paymentDateTime.slice(0, 19).replace('T', ' ') : '',
+    'Method': p.paymentMethod,
+    'Reference': p.paymentReference || '',
+    'Recorded By': p.recordedBy,
+    'Station': p.stationId || '',
+    'Notes': p.notes || ''
+  }));
+  const wsPayments = XLSX.utils.json_to_sheet(paymentRows);
+  XLSX.utils.book_append_sheet(workbook, wsPayments, 'Payment Ledger');
+
+  // 3. Registrar Breakdown Sheet
+  const registrarMap = new Map<string, { count: number; cash: number; digital: number; total: number }>();
+  attendees.forEach(a => {
+    const reg = a.registeredBy || 'Unknown';
+    if (!registrarMap.has(reg)) {
+      registrarMap.set(reg, { count: 0, cash: 0, digital: 0, total: 0 });
+    }
+    registrarMap.get(reg)!.count++;
+  });
+  payments.forEach(p => {
+    const reg = p.recordedBy || 'Unknown';
+    if (!registrarMap.has(reg)) {
+      registrarMap.set(reg, { count: 0, cash: 0, digital: 0, total: 0 });
+    }
+    const rec = registrarMap.get(reg)!;
+    const amt = Number(p.amount) || 0;
+    rec.total += amt;
+    if (p.paymentMethod === 'Cash') {
+      rec.cash += amt;
+    } else {
+      rec.digital += amt;
+    }
+  });
+  const registrarRows: any[] = [];
+  registrarMap.forEach((val, key) => {
+    registrarRows.push({
+      'Registrar / Staff': key,
+      'Registrations Count': val.count,
+      'Physical Cash ($)': val.cash,
+      'Digital / Bank ($)': val.digital,
+      'Total Monies Recorded ($)': val.total
+    });
+  });
+  const wsRegistrars = XLSX.utils.json_to_sheet(registrarRows);
+  XLSX.utils.book_append_sheet(workbook, wsRegistrars, 'Staff Breakdown');
+
+  // 4. Camp Summary
+  const totalDue = attendees.reduce((acc, a) => acc + (a.amountDue || 0), 0);
+  const totalPaid = attendees.reduce((acc, a) => acc + (a.amountPaid || 0), 0);
+  const totalCash = payments.filter(p => p.paymentMethod === 'Cash').reduce((acc, p) => acc + (p.amount || 0), 0);
+  const totalDigital = totalPaid - totalCash;
+  const checkedInCount = attendees.filter(a => a.checkInStatus === 'Checked In').length;
+
+  const summaryRows = [
+    { 'Metric': 'Camp Name', 'Value': settings.campName },
+    { 'Metric': 'Venue', 'Value': settings.venue },
+    { 'Metric': 'Total Capacity', 'Value': settings.totalCapacity },
+    { 'Metric': 'Total Active Attendees', 'Value': attendees.filter(a => a.registrationStatus === 'Active').length },
+    { 'Metric': 'Checked-In Count', 'Value': checkedInCount },
+    { 'Metric': 'Total Expected Monies ($)', 'Value': totalDue },
+    { 'Metric': 'Total Monies Collected ($)', 'Value': totalPaid },
+    { 'Metric': 'Total Physical Cash ($)', 'Value': totalCash },
+    { 'Metric': 'Total Digital / Bank Transfers ($)', 'Value': totalDigital },
+    { 'Metric': 'Total Outstanding Balance ($)', 'Value': Math.max(0, totalDue - totalPaid) }
+  ];
+  const wsSummary = XLSX.utils.json_to_sheet(summaryRows);
+  XLSX.utils.book_append_sheet(workbook, wsSummary, 'Camp Summary');
+
+  // 5. Audit Trail Sheet
+  const auditRows = auditLogs.map(l => ({
+    'Timestamp': l.timestamp ? l.timestamp.slice(0, 19).replace('T', ' ') : '',
+    'Event': l.eventType,
+    'Staff': l.staffMember,
+    'Reg ID': l.registrationId || '',
+    'Description': l.description
+  }));
+  const wsAudit = XLSX.utils.json_to_sheet(auditRows);
+  XLSX.utils.book_append_sheet(workbook, wsAudit, 'Audit Trail');
+
+  const nowStr = new Date().toISOString().slice(0, 10);
+  const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+
+  const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  downloadBlob(blob, `ProvincialCamp_2026_FullDatabase_${nowStr}.xlsx`);
+}
+
+/**
+ * Generates an official, print-ready Registrar Accountability Register PDF.
+ * Uses jsPDF and jspdf-autotable to list all attendees registered by the specified staff,
+ * calculate the exact physical cash they must hand over, and provide physical handover signature blocks.
+ */
+export function generateAccountabilityPDF(
+  account: UserAccount,
+  attendees: Attendee[],
+  payments: PaymentTransaction[]
+): void {
+  const doc = new jsPDF({ orientation: 'portrait', unit: 'mm', format: 'a4' });
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const timeStr = new Date().toLocaleTimeString();
+
+  // Filter attendees & payments for this specific registrar
+  const staffAttendees = attendees.filter(a => 
+    a.registeredBy === account.displayName || 
+    a.registeredBy === account.accountCode ||
+    a.registeredBy === account.username
+  );
+
+  const staffPayments = payments.filter(p => 
+    p.recordedBy === account.displayName || 
+    p.recordedBy === account.accountCode ||
+    p.recordedBy === account.username
+  );
+
+  // Financial totals
+  let cashTotal = 0;
+  let ecocashTotal = 0;
+  let bankTotal = 0;
+  let otherTotal = 0;
+
+  staffPayments.forEach(p => {
+    const amt = Number(p.amount) || 0;
+    if (p.paymentMethod === 'Cash') cashTotal += amt;
+    else if (p.paymentMethod === 'EcoCash / Mobile Money') ecocashTotal += amt;
+    else if (p.paymentMethod === 'Bank Transfer') bankTotal += amt;
+    else otherTotal += amt;
+  });
+
+  const totalCollected = cashTotal + ecocashTotal + bankTotal + otherTotal;
+  const totalBalance = staffAttendees.reduce((acc, a) => acc + (a.balance || 0), 0);
+
+  // Header Banner
+  doc.setFillColor(15, 23, 42); // slate-900
+  doc.rect(0, 0, 210, 24, 'F');
+
+  doc.setFontSize(14);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(255, 255, 255);
+  doc.text('PROVINCIAL CAMP 2026 — REGISTRAR ACCOUNTABILITY REGISTER', 14, 11);
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(148, 163, 184); // slate-400
+  doc.text(`Official Handover & Audit Register • Generated: ${dateStr} ${timeStr}`, 14, 18);
+
+  // Registrar Metadata Info Box
+  doc.setFillColor(241, 245, 249); // slate-100
+  doc.roundedRect(14, 28, 182, 18, 2, 2, 'F');
+
+  doc.setFontSize(9);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text('Registrar Account:', 18, 35);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`${account.displayName} (${account.accountCode})`, 50, 35);
+
+  doc.setFont('helvetica', 'bold');
+  doc.text('Station / Desk:', 18, 41);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`${account.stationId}`, 50, 41);
+
+  doc.setFont('helvetica', 'bold');
+  doc.text('Registrations Handled:', 120, 35);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`${staffAttendees.length} Attendees`, 162, 35);
+
+  doc.setFont('helvetica', 'bold');
+  doc.text('Date of Register:', 120, 41);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`${dateStr}`, 162, 41);
+
+  // Financial Accountability Summary Cards
+  // 1. Cash Card (Highlighted)
+  doc.setFillColor(236, 253, 245); // emerald-50
+  doc.setDrawColor(16, 185, 129); // emerald-500
+  doc.roundedRect(14, 49, 43, 20, 2, 2, 'FD');
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(4, 120, 87); // emerald-700
+  doc.text('PHYSICAL CASH ON HAND', 17, 54);
+  doc.setFontSize(12);
+  doc.text(`US$${cashTotal.toFixed(2)}`, 17, 62);
+  doc.setFontSize(6.5);
+  doc.setFont('helvetica', 'normal');
+  doc.text('MUST HAND OVER TO ADMIN', 17, 66);
+
+  // 2. EcoCash / Mobile
+  doc.setFillColor(240, 249, 255); // sky-50
+  doc.setDrawColor(14, 165, 233);
+  doc.roundedRect(60, 49, 43, 20, 2, 2, 'FD');
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(3, 105, 161);
+  doc.text('ECOCASH / MOBILE MONEY', 63, 54);
+  doc.setFontSize(12);
+  doc.text(`US$${ecocashTotal.toFixed(2)}`, 63, 62);
+  doc.setFontSize(6.5);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Verified digital transfers', 63, 66);
+
+  // 3. Bank / Other
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(148, 163, 184);
+  doc.roundedRect(106, 49, 43, 20, 2, 2, 'FD');
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(71, 85, 105);
+  doc.text('BANK TRANSFERS / OTHER', 109, 54);
+  doc.setFontSize(12);
+  doc.text(`US$${(bankTotal + otherTotal).toFixed(2)}`, 109, 62);
+  doc.setFontSize(6.5);
+  doc.setFont('helvetica', 'normal');
+  doc.text('Bank & card payments', 109, 66);
+
+  // 4. Total Collected
+  doc.setFillColor(245, 243, 255); // indigo-50
+  doc.setDrawColor(129, 140, 248);
+  doc.roundedRect(152, 49, 44, 20, 2, 2, 'FD');
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(79, 70, 229);
+  doc.text('TOTAL MONIES RECORDED', 155, 54);
+  doc.setFontSize(12);
+  doc.text(`US$${totalCollected.toFixed(2)}`, 155, 62);
+  doc.setFontSize(6.5);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Balance due: US$${totalBalance.toFixed(2)}`, 155, 66);
+
+  // Attendees Table
+  const tableRows = staffAttendees.map((a, idx) => {
+    // Find matching payment for this attendee
+    const attPayment = staffPayments.find(p => p.attendeeId === a.id);
+    return [
+      String(idx + 1),
+      a.registrationId,
+      a.fullName,
+      a.phoneNumber,
+      a.churchAssembly.slice(0, 16),
+      a.registrationDate ? a.registrationDate.slice(5, 10) : '',
+      attPayment ? attPayment.paymentMethod.replace(' / Mobile Money', '') : (a.amountPaid > 0 ? 'Recorded' : 'Unpaid'),
+      attPayment?.paymentReference || '-',
+      `$${a.amountPaid.toFixed(2)}`,
+      `$${a.balance.toFixed(2)}`
+    ];
+  });
+
+  autoTable(doc, {
+    startY: 73,
+    head: [['#', 'Reg ID', 'Full Name', 'Phone Number', 'Church Assembly', 'Date', 'Method', 'Reference', 'Paid', 'Balance']],
+    body: tableRows.length > 0 ? tableRows : [['-', '-', 'No registrations recorded under this account yet', '-', '-', '-', '-', '-', '$0.00', '$0.00']],
+    theme: 'grid',
+    headStyles: {
+      fillColor: [15, 23, 42],
+      textColor: [255, 255, 255],
+      fontSize: 7.5,
+      fontStyle: 'bold',
+      halign: 'left',
+      cellPadding: 1.8
+    },
+    bodyStyles: {
+      fontSize: 7.5,
+      textColor: [30, 41, 59],
+      cellPadding: 1.8
+    },
+    alternateRowStyles: {
+      fillColor: [248, 250, 252]
+    },
+    columnStyles: {
+      0: { cellWidth: 7, halign: 'center' },
+      1: { cellWidth: 17, fontStyle: 'bold' },
+      2: { cellWidth: 34 },
+      3: { cellWidth: 24 },
+      4: { cellWidth: 26 },
+      5: { cellWidth: 14 },
+      6: { cellWidth: 20 },
+      7: { cellWidth: 20 },
+      8: { cellWidth: 12, halign: 'right', fontStyle: 'bold' },
+      9: { cellWidth: 12, halign: 'right' }
+    }
+  });
+
+  // Handover & Reconcile Signatures
+  let finalY = (doc as any).lastAutoTable?.finalY || 160;
+  if (finalY > 225) {
+    doc.addPage();
+    finalY = 20;
+  } else {
+    finalY += 10;
+  }
+
+  // Formal Handover Declaration
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(203, 213, 225);
+  doc.roundedRect(14, finalY, 182, 38, 2, 2, 'FD');
+
+  doc.setFontSize(8.5);
+  doc.setFont('helvetica', 'bold');
+  doc.setTextColor(15, 23, 42);
+  doc.text('FORMAL CASH HANDOVER & RECONCILIATION CERTIFICATE', 18, finalY + 6);
+
+  doc.setFontSize(7.5);
+  doc.setFont('helvetica', 'normal');
+  doc.setTextColor(71, 85, 105);
+  doc.text(
+    `I, the undersigned Registrar, certify that the ${staffAttendees.length} attendees listed above were registered by me, and I have handed over`,
+    18, finalY + 11
+  );
+  doc.text(
+    `the exact physical cash amount of US$${cashTotal.toFixed(2)} to the Master Admin for Provincial Camp 2026 funds.`,
+    18, finalY + 15
+  );
+
+  // Registrar Signature Line
+  doc.setFont('helvetica', 'bold');
+  doc.text('Registrar Signature:', 18, finalY + 24);
+  doc.line(48, finalY + 24, 98, finalY + 24);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Date: _________________`, 18, finalY + 31);
+
+  // Master Admin Signature Line
+  doc.setFont('helvetica', 'bold');
+  doc.text('Master Admin Signature:', 108, finalY + 24);
+  doc.line(144, finalY + 24, 190, finalY + 24);
+  doc.setFont('helvetica', 'normal');
+  doc.text(`Date: _________________`, 108, finalY + 31);
+
+  // Save PDF
+  const filename = `Accountability_Register_${account.accountCode}_${dateStr}.pdf`;
+  doc.save(filename);
+}
+
+/**
+ * Exports registrar register to a dedicated Excel file (.xlsx)
+ */
+export function exportAccountabilityExcel(
+  account: UserAccount,
+  attendees: Attendee[],
+  payments: PaymentTransaction[]
+): void {
+  const staffAttendees = attendees.filter(a => 
+    a.registeredBy === account.displayName || 
+    a.registeredBy === account.accountCode ||
+    a.registeredBy === account.username
+  );
+
+  const staffPayments = payments.filter(p => 
+    p.recordedBy === account.displayName || 
+    p.recordedBy === account.accountCode ||
+    p.recordedBy === account.username
+  );
+
+  const rows = staffAttendees.map((a, idx) => {
+    const attPayment = staffPayments.find(p => p.attendeeId === a.id);
+    return {
+      '#': idx + 1,
+      'Registration ID': a.registrationId,
+      'Full Name': a.fullName,
+      'Phone Number': a.phoneNumber,
+      'Church Assembly': a.churchAssembly,
+      'Registration Date': a.registrationDate ? a.registrationDate.slice(0, 10) : '',
+      'Payment Method': attPayment?.paymentMethod || (a.amountPaid > 0 ? 'Recorded' : 'Unpaid'),
+      'Payment Reference': attPayment?.paymentReference || '',
+      'Amount Due (USD)': a.amountDue,
+      'Amount Paid (USD)': a.amountPaid,
+      'Balance (USD)': a.balance,
+      'Check-In Status': a.checkInStatus,
+      'Registrar': account.displayName
+    };
+  });
+
+  const worksheet = XLSX.utils.json_to_sheet(rows);
+  const workbook = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(workbook, worksheet, 'Registrar Register');
+
+  const dateStr = new Date().toISOString().slice(0, 10);
+  const wbout = XLSX.write(workbook, { bookType: 'xlsx', type: 'array' });
+  const blob = new Blob([wbout], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+  downloadBlob(blob, `Accountability_Register_${account.accountCode}_${dateStr}.xlsx`);
+}
+

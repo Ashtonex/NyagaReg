@@ -22,6 +22,9 @@ import {
   exportAttendeesToSpreadsheet, 
   importAttendeesFromSpreadsheet, 
   downloadBlob,
+  downloadJsonDatabaseFile,
+  exportFullExcelDatabase,
+  restoreJsonDatabaseFromFile,
   type SyncMergeResult
 } from '../../db/syncEngine';
 import type { DatabaseBackup } from '../../types';
@@ -39,9 +42,11 @@ export const SyncAndBackupView: React.FC = () => {
   const fileInputSyncRef = useRef<HTMLInputElement>(null);
   const fileInputBackupRef = useRef<HTMLInputElement>(null);
   const fileInputSpreadsheetRef = useRef<HTMLInputElement>(null);
+  const fileInputJsonRef = useRef<HTMLInputElement>(null);
 
   const attendees = useLiveQuery(() => db.attendees.toArray(), []);
   const payments = useLiveQuery(() => db.payments.toArray(), []);
+
 
   const isAdmin = activeRole === 'ADMIN';
 
@@ -109,6 +114,52 @@ export const SyncAndBackupView: React.FC = () => {
       setIsProcessing(false);
     }
   };
+
+  const handleDownloadJsonFile = async () => {
+    setIsProcessing(true);
+    try {
+      await downloadJsonDatabaseFile();
+      showToast('success', 'Full camp database downloaded as camp_database.json');
+    } catch (err: any) {
+      showToast('error', `Failed to download JSON: ${err.message || err}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleDownloadFullExcel = async () => {
+    setIsProcessing(true);
+    try {
+      await exportFullExcelDatabase();
+      showToast('success', 'Complete database exported as multi-sheet Excel (.xlsx)');
+    } catch (err: any) {
+      showToast('error', `Failed to export Excel: ${err.message || err}`);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  const handleRestoreJsonFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!window.confirm('Restore database from this JSON file? Existing local records will be synchronized.')) {
+      if (fileInputJsonRef.current) fileInputJsonRef.current.value = '';
+      return;
+    }
+
+    setIsProcessing(true);
+    try {
+      const count = await restoreJsonDatabaseFromFile(file);
+      showToast('success', `Restored ${count} attendees from JSON database file.`);
+    } catch (err: any) {
+      showToast('error', `Restore failed: ${err.message || err}`);
+    } finally {
+      setIsProcessing(false);
+      if (fileInputJsonRef.current) fileInputJsonRef.current.value = '';
+    }
+  };
+
 
   // 4. Restore Full Database Backup with explicit safeguards (Section 16)
   const handleSelectBackupFile = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -254,6 +305,66 @@ export const SyncAndBackupView: React.FC = () => {
           )}
         </div>
       )}
+
+      {/* SECTION 0: LOCAL JSON DATABASE & EXCEL WORKBOOK */}
+      <div className="bg-gradient-to-br from-teal-900 to-slate-900 text-white rounded-2xl p-6 shadow-md border border-teal-800/60 space-y-4">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+          <div>
+            <div className="inline-flex items-center space-x-1.5 px-2 py-0.5 rounded-md bg-teal-500/20 text-teal-300 text-[10px] font-bold uppercase tracking-wider mb-2 border border-teal-500/30">
+              <Database className="w-3 h-3" />
+              <span>Offline Database Engine</span>
+            </div>
+            <h3 className="text-lg font-black tracking-tight text-white">
+              Persistent Camp Database (JSON & Multi-Sheet Excel)
+            </h3>
+            <p className="text-xs text-slate-300 mt-1 max-w-xl">
+              All registrations and payments are saved permanently into local IndexedDB and mirrored to a persistent local JSON store in localStorage. You can download the JSON database file or the complete Excel workbook anytime.
+            </p>
+          </div>
+
+          <div className="flex items-center space-x-2">
+            <span className="text-xs font-mono font-bold bg-slate-800 text-teal-300 px-3 py-1.5 rounded-lg border border-slate-700">
+              {attendees?.length || 0} Attendees • {payments?.length || 0} Payments
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 pt-2">
+          {/* Download JSON Database */}
+          <button
+            onClick={handleDownloadJsonFile}
+            className="flex items-center justify-center space-x-2 p-3 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold transition shadow-sm active:scale-95 cursor-pointer"
+          >
+            <Download className="w-4 h-4" />
+            <span>Download JSON Database</span>
+          </button>
+
+          {/* Download Full Excel */}
+          <button
+            onClick={handleDownloadFullExcel}
+            className="flex items-center justify-center space-x-2 p-3 bg-emerald-700 hover:bg-emerald-600 text-white rounded-xl text-xs font-bold transition shadow-sm active:scale-95 cursor-pointer"
+          >
+            <FileSpreadsheet className="w-4 h-4" />
+            <span>Download Full Excel (.xlsx)</span>
+          </button>
+
+          {/* Restore JSON Database */}
+          <button
+            onClick={() => fileInputJsonRef.current?.click()}
+            className="flex items-center justify-center space-x-2 p-3 bg-slate-800 hover:bg-slate-700 text-white border border-slate-700 rounded-xl text-xs font-bold transition shadow-sm active:scale-95 cursor-pointer"
+          >
+            <Upload className="w-4 h-4 text-teal-400" />
+            <span>Restore from JSON File</span>
+          </button>
+          <input
+            ref={fileInputJsonRef}
+            type="file"
+            accept=".json"
+            onChange={handleRestoreJsonFile}
+            className="hidden"
+          />
+        </div>
+      </div>
 
       {/* SECTION 1: ADMINISTRARAE MULTI-DEVICE OFFLINE SYNC */}
       <div className="bg-white rounded-2xl p-6 shadow-xs border border-slate-200 space-y-5">

@@ -17,7 +17,8 @@ import {
   getNextRegistrationId, 
   computePaymentStatus, 
   createVerificationToken, 
-  logAuditEvent 
+  logAuditEvent,
+  syncPersistentJsonDb
 } from '../../db/db';
 import type { Attendee, PaymentTransaction } from '../../types';
 
@@ -277,6 +278,9 @@ export const RegistrationFormModal: React.FC<RegistrationFormModalProps> = ({ is
         newAttendee.registrationId,
         newAttendee.id
       );
+
+      // Immediately sync to persistent JSON database in localStorage
+      await syncPersistentJsonDb();
 
       confetti({
         particleCount: 80,

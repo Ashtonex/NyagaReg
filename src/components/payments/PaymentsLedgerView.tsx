@@ -1,9 +1,18 @@
 import React, { useState, useMemo } from 'react';
 import { useLiveQuery } from 'dexie-react-hooks';
-import { CreditCard, Search } from 'lucide-react';
+import { CreditCard, Search, FileText, ShieldCheck } from 'lucide-react';
+import { useApp } from '../../context/AppContext';
 import { db } from '../../db/db';
 
 export const PaymentsLedgerView: React.FC = () => {
+  const { 
+    currentAccount, 
+    allAccounts, 
+    activeRegistrarFilter, 
+    setActiveRegistrarFilter,
+    openAccountability 
+  } = useApp();
+
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filterMethod, setFilterMethod] = useState<string>('all');
 
@@ -19,24 +28,45 @@ export const PaymentsLedgerView: React.FC = () => {
     return map;
   }, [attendees]);
 
-  // Aggregate totals
+  // Scoped payments list based on user account
+  const scopedPayments = useMemo(() => {
+    if (!payments) return [];
+    let list = [...payments];
+
+    if (currentAccount.role !== 'ADMIN') {
+      list = list.filter(p =>
+        p.recordedBy === currentAccount.displayName ||
+        p.recordedBy === currentAccount.accountCode ||
+        p.recordedBy === currentAccount.username
+      );
+    } else if (activeRegistrarFilter !== 'ALL') {
+      list = list.filter(p =>
+        p.recordedBy === activeRegistrarFilter ||
+        Boolean(p.recordedBy && p.recordedBy.includes(activeRegistrarFilter))
+      );
+    }
+
+    return list;
+  }, [payments, currentAccount, activeRegistrarFilter]);
+
+  // Aggregate totals from scoped payments
   const aggregates = useMemo(() => {
-    if (!payments) return { total: 0, count: 0, byMethod: {} as Record<string, number> };
+    if (!scopedPayments) return { total: 0, count: 0, byMethod: {} as Record<string, number> };
     let total = 0;
     const byMethod: Record<string, number> = {};
 
-    payments.forEach(p => {
+    scopedPayments.forEach(p => {
       const amt = Number(p.amount) || 0;
       total += amt;
       byMethod[p.paymentMethod] = (byMethod[p.paymentMethod] || 0) + amt;
     });
 
-    return { total, count: payments.length, byMethod };
-  }, [payments]);
+    return { total, count: scopedPayments.length, byMethod };
+  }, [scopedPayments]);
 
   const filteredPayments = useMemo(() => {
-    if (!payments) return [];
-    let list = [...payments];
+    if (!scopedPayments) return [];
+    let list = [...scopedPayments];
 
     if (searchQuery.trim()) {
       const q = searchQuery.toLowerCase().trim();
@@ -56,7 +86,8 @@ export const PaymentsLedgerView: React.FC = () => {
     }
 
     return list;
-  }, [payments, searchQuery, filterMethod, attendeeMap]);
+  }, [scopedPayments, searchQuery, filterMethod, attendeeMap]);
+
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
@@ -79,6 +110,57 @@ export const PaymentsLedgerView: React.FC = () => {
           </span>
         </div>
       </div>
+
+      {/* Scoped View Banner */}
+      {currentAccount.role !== 'ADMIN' ? (
+        <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center space-x-2">
+            <span className="w-2.5 h-2.5 rounded-full bg-teal-600 animate-pulse"></span>
+            <span className="text-teal-900 font-bold">
+              Payments Scoped View: {currentAccount.displayName}
+            </span>
+            <span className="text-teal-700 hidden sm:inline font-medium">
+              • Showing only payment transactions recorded by you
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => openAccountability(currentAccount)}
+            className="flex items-center space-x-1 px-2.5 py-1 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-bold text-xs shadow-2xs transition"
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>Generate Handover PDF</span>
+          </button>
+        </div>
+      ) : (
+        <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center space-x-2">
+            <span className="font-bold text-slate-700 uppercase tracking-wider">Staff Filter:</span>
+            <select
+              value={activeRegistrarFilter}
+              onChange={e => setActiveRegistrarFilter(e.target.value)}
+              className="bg-white border border-slate-300 rounded-lg px-2.5 py-1 font-bold text-slate-800 focus:ring-2 focus:ring-teal-500 cursor-pointer"
+            >
+              <option value="ALL">All Staff & Gate (Camp Ledger)</option>
+              {allAccounts.map(acc => (
+                <option key={acc.id} value={acc.displayName}>
+                  {acc.displayName} ({acc.accountCode})
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => openAccountability()}
+            className="flex items-center space-x-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow-2xs transition"
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>Registrar Cash Handover PDF</span>
+          </button>
+        </div>
+      )}
+
 
       {/* Payment Method Breakdown Badges */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">

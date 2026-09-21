@@ -9,14 +9,27 @@ import {
   Users, 
   FileSpreadsheet, 
   ChevronRight, 
-  ArrowUpDown 
+  ArrowUpDown,
+  FileText,
+  ShieldCheck
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { db } from '../../db/db';
 import { exportAttendeesToSpreadsheet } from '../../db/syncEngine';
 
 export const AttendeeListView: React.FC = () => {
-  const { openReceipt, openPayment, openProfile, openPrintBatch, showToast } = useApp();
+  const { 
+    openReceipt, 
+    openPayment, 
+    openProfile, 
+    openPrintBatch, 
+    showToast,
+    currentAccount,
+    allAccounts,
+    activeRegistrarFilter,
+    setActiveRegistrarFilter,
+    openAccountability
+  } = useApp();
 
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [filterCategory, setFilterCategory] = useState<string>('all');
@@ -30,6 +43,21 @@ export const AttendeeListView: React.FC = () => {
     if (!attendees) return [];
 
     let list = [...attendees];
+
+    // Staff Account Scoping: non-admin accounts only see what they register
+    if (currentAccount.role !== 'ADMIN') {
+      list = list.filter(a =>
+        a.registeredBy === currentAccount.displayName ||
+        a.registeredBy === currentAccount.accountCode ||
+        a.registeredBy === currentAccount.username
+      );
+    } else if (activeRegistrarFilter !== 'ALL') {
+      list = list.filter(a =>
+        a.registeredBy === activeRegistrarFilter ||
+        Boolean(a.registeredBy && a.registeredBy.includes(activeRegistrarFilter))
+      );
+    }
+
 
     // Search query
     if (searchQuery.trim()) {
@@ -176,6 +204,56 @@ export const AttendeeListView: React.FC = () => {
       {/* Filter Tabs & Search Bar */}
       <div className="bg-white rounded-2xl shadow-xs border border-slate-200 p-4 space-y-4">
         
+        {/* Scoped View Banner */}
+        {currentAccount.role !== 'ADMIN' ? (
+          <div className="bg-teal-50 border border-teal-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+            <div className="flex items-center space-x-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-teal-600 animate-pulse"></span>
+              <span className="text-teal-900 font-bold">
+                Account Scoped View: {currentAccount.displayName}
+              </span>
+              <span className="text-teal-700 hidden sm:inline font-medium">
+                • Displaying only attendees registered under your staff account
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => openAccountability(currentAccount)}
+              className="flex items-center space-x-1 px-2.5 py-1 bg-teal-600 hover:bg-teal-700 text-white rounded-lg font-bold text-xs shadow-2xs transition"
+            >
+              <FileText className="w-3.5 h-3.5" />
+              <span>My Register & PDF</span>
+            </button>
+          </div>
+        ) : (
+          <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center space-x-2">
+              <span className="font-bold text-slate-700 uppercase tracking-wider">Registrar Scope:</span>
+              <select
+                value={activeRegistrarFilter}
+                onChange={e => setActiveRegistrarFilter(e.target.value)}
+                className="bg-white border border-slate-300 rounded-lg px-2.5 py-1 font-bold text-slate-800 focus:ring-2 focus:ring-teal-500 cursor-pointer"
+              >
+                <option value="ALL">All Registrars & Desks (Camp Total)</option>
+                {allAccounts.filter(a => a.role === 'REGISTRAR').map(acc => (
+                  <option key={acc.id} value={acc.displayName}>
+                    {acc.displayName} ({acc.accountCode})
+                  </option>
+                ))}
+              </select>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => openAccountability()}
+              className="flex items-center space-x-1.5 px-3 py-1 bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg font-bold text-xs shadow-2xs transition"
+            >
+              <ShieldCheck className="w-3.5 h-3.5" />
+              <span>Registrar Accountability PDF</span>
+            </button>
+          </div>
+        )}
+
         {/* Search row */}
         <div className="relative">
           <Search className="w-4 h-4 absolute left-3.5 top-3 text-slate-400" />
@@ -308,11 +386,16 @@ export const AttendeeListView: React.FC = () => {
                         {a.registrationId}
                       </td>
                       <td className={`p-3.5 font-bold ${isCancelled ? 'text-slate-500' : 'text-slate-900'}`}>
-                        <div className="flex items-center space-x-2">
+                        <div className="flex flex-wrap items-center gap-1.5">
                           <span>{a.fullName}</span>
                           {isCancelled && (
                             <span className="text-[10px] font-semibold px-1.5 py-0.2 rounded bg-slate-200 text-slate-600">
                               CANCELLED
+                            </span>
+                          )}
+                          {a.registeredBy && (
+                            <span className="text-[10px] font-medium px-1.5 py-0.2 rounded bg-slate-100 text-slate-600 border border-slate-200">
+                              {a.registeredBy}
                             </span>
                           )}
                         </div>

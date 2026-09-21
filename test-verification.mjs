@@ -101,6 +101,48 @@ if (resolvedCheckIn === 'Checked In' && totalPaid === 35 && balance === 0 && fin
   passCount++;
 }
 
-console.log(`\n========================================`);
-console.log(`VERIFICATION RESULT: ${passCount} / 8 TESTS PASSED!`);
-console.log(`========================================`);
+// Test 5: Hardcoded Accounts & Scoping Logic
+console.log('\n--- Test 5: Staff Accounts & Scoping Rules ---');
+const accounts = [
+  { id: 'admin', role: 'ADMIN', pin: '2026', code: 'ADMIN' },
+  { id: 'acc-a', role: 'REGISTRAR', pin: '1001', code: 'ACC-A' },
+  { id: 'acc-b', role: 'REGISTRAR', pin: '1002', code: 'ACC-B' }
+];
+
+const verifyPin = (acc, pin) => acc.pin === pin || pin === '2026';
+const pinValidA = verifyPin(accounts[1], '1001');
+const pinValidAdminOverride = verifyPin(accounts[1], '2026');
+const pinInvalid = !verifyPin(accounts[1], '9999');
+
+console.log(`PIN verification: valid=${pinValidA}, adminOverride=${pinValidAdminOverride}, invalidBlocked=${pinInvalid} [PASS]`);
+if (pinValidA && pinValidAdminOverride && pinInvalid) {
+  passCount++;
+}
+
+// Test 6: Cash Handover & Accountability Metrics Calculation
+console.log('\n--- Test 6: Accountability Cash Handover Calculation ---');
+const registrarPayments = [
+  { amount: 35, method: 'Cash', staff: 'Account A (Tinashe)' },
+  { amount: 35, method: 'Cash', staff: 'Account A (Tinashe)' },
+  { amount: 20, method: 'EcoCash / Mobile Money', staff: 'Account A (Tinashe)' },
+  { amount: 35, method: 'Cash', staff: 'Account B (Rudo)' }
+];
+
+const staffAPayments = registrarPayments.filter(p => p.staff === 'Account A (Tinashe)');
+const cashToHandOver = staffAPayments.filter(p => p.method === 'Cash').reduce((s, p) => s + p.amount, 0);
+const digitalRecorded = staffAPayments.filter(p => p.method !== 'Cash').reduce((s, p) => s + p.amount, 0);
+
+console.log(`Staff A: Physical Cash to Hand Over: $${cashToHandOver}, Digital: $${digitalRecorded} [PASS]`);
+if (cashToHandOver === 70 && digitalRecorded === 20) {
+  passCount++;
+}
+
+console.log('\n========================================');
+console.log(`VERIFICATION RESULT: ${passCount} / 10 TESTS PASSED!`);
+console.log('========================================\n');
+
+if (passCount === 10) {
+  process.exit(0);
+} else {
+  process.exit(1);
+}

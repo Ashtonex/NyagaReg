@@ -392,19 +392,84 @@ export async function seedDemoData(): Promise<void> {
 }
 
 /**
- * Removes ONLY the 4 development demo records without touching real records.
+ * Removes ONLY the development demo records (identified by Demo Attendee in notes) without touching real records.
  */
 export async function removeDemoData(): Promise<number> {
-  const demoRegIds = ['PC-0001', 'PC-0002', 'PC-0003', 'PC-0004'];
-  const demoAttendees = await db.attendees.where('registrationId').anyOf(demoRegIds).toArray();
+  const demoAttendees = await db.attendees
+    .filter(a => Boolean(a.notes && a.notes.includes('Demo Attendee')))
+    .toArray();
   const demoIds = demoAttendees.map(a => a.id);
+  const demoRegIds = demoAttendees.map(a => a.registrationId);
 
   if (demoIds.length > 0) {
     await db.attendees.where('id').anyOf(demoIds).delete();
     await db.payments.where('registrationId').anyOf(demoRegIds).delete();
     await logAuditEvent('Registration cancelled', `Removed ${demoIds.length} demo records safely from database`);
+    await syncPersistentJsonDb();
   }
   return demoIds.length;
+}
+
+export const PERSISTENT_JSON_DB_KEY = 'administrare_persistent_camp_database_json';
+
+/**
+ * Serializes the current IndexedDB state to a JSON structure in localStorage.
+ * Runs in background after every change to prevent any data loss on browser refresh.
+ */
+export async function syncPersistentJsonDb(): Promise<void> {
+  try {
+    const settings = await getSettings();
+    const sequence = await db.sequences.get('reg_id_sequence');
+    const attendees = await db.attendees.toArray();
+    const payments = await db.payments.toArray();
+    const auditLogs = await db.auditLogs.toArray();
+
+    const dbPayload = {
+      backupVersion: '2.0',
+      appName: 'Administrare - Provincial Camp 2026',
+      timestamp: new Date().toISOString(),
+      settings,
+      sequenceCounter: sequence,
+      attendees,
+      payments,
+      auditLogs
+    };
+
+    localStorage.setItem(PERSISTENT_JSON_DB_KEY, JSON.stringify(dbPayload));
+  } catch (err) {
+    console.warn('Failed to sync persistent JSON database to localStorage:', err);
+  }
+}
+
+/**
+ * Hydrates IndexedDB from the localStorage JSON mirror if IndexedDB is empty.
+ * Returns true if records were restored.
+ */
+export async function hydrateFromPersistentJsonDb(): Promise<boolean> {
+  try {
+    const count = await db.attendees.count();
+    if (count > 0) return false;
+
+    const raw = localStorage.getItem(PERSISTENT_JSON_DB_KEY);
+    if (!raw) return false;
+
+    const data = JSON.parse(raw);
+    if (!data || !Array.isArray(data.attendees) || data.attendees.length === 0) return false;
+
+    await db.transaction('rw', [db.attendees, db.payments, db.auditLogs, db.settings, db.sequences], async () => {
+      if (data.settings) await db.settings.put(data.settings);
+      if (data.sequenceCounter) await db.sequences.put(data.sequenceCounter);
+      if (data.attendees?.length) await db.attendees.bulkPut(data.attendees);
+      if (data.payments?.length) await db.payments.bulkPut(data.payments);
+      if (data.auditLogs?.length) await db.auditLogs.bulkPut(data.auditLogs);
+    });
+
+    console.info(`Hydrated ${data.attendees.length} attendees from persistent JSON database mirror.`);
+    return true;
+  } catch (err) {
+    console.error('Failed to hydrate from persistent JSON database:', err);
+    return false;
+  }
 }
 
 export async function clearAllDatabaseRecords(): Promise<void> {
@@ -412,5 +477,7 @@ export async function clearAllDatabaseRecords(): Promise<void> {
   await db.payments.clear();
   await db.auditLogs.clear();
   await db.sequences.clear();
+  localStorage.removeItem(PERSISTENT_JSON_DB_KEY);
   await logAuditEvent('Backup restored', 'All database records cleared by administrator');
 }
+

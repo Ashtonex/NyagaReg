@@ -10,7 +10,7 @@ import {
   User 
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { db, computePaymentStatus, logAuditEvent } from '../../db/db';
+import { db, computePaymentStatus, logAuditEvent, syncPersistentJsonDb } from '../../db/db';
 import type { Attendee, PaymentTransaction } from '../../types';
 
 interface PaymentModalProps {
@@ -99,6 +99,9 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ attendee, onClose })
         attendee.registrationId,
         attendee.id
       );
+
+      // Immediately sync to persistent JSON database in localStorage
+      await syncPersistentJsonDb();
 
       showToast('success', `Payment of US$${paymentVal.toFixed(2)} recorded for ${attendee.fullName}`);
       setAmount('');

@@ -144,3 +144,15 @@ export interface DatabaseBackup {
   payments: PaymentTransaction[];
   auditLogs: AuditEvent[];
 }
+
+export interface UserAccount {
+  id: string;
+  username: string;
+  displayName: string;
+  role: StaffRole;
+  pin: string;
+  accountCode: string; // e.g. 'ADMIN', 'ACC-A', 'ACC-B', 'ACC-C', 'ACC-D', 'GATE-1'
+  stationId: string;
+  avatarColor: string;
+}
+

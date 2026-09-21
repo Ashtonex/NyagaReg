@@ -15,7 +15,10 @@ import { EReceiptModal } from './components/receipts/EReceiptModal';
 import { PrintPassesModal } from './components/receipts/PrintPassesModal';
 import { PaymentModal } from './components/payments/PaymentModal';
 import { AttendeeProfileModal } from './components/attendees/AttendeeProfileModal';
+import { AccountSwitcherModal } from './components/auth/AccountSwitcherModal';
+import { AccountabilityModal } from './components/accountability/AccountabilityModal';
 import type { Attendee } from './types';
+
 
 const MainContent: React.FC = () => {
   const [activeTab, setActiveTab] = useState<TabType>('dashboard');
@@ -100,11 +103,18 @@ const MainContent: React.FC = () => {
         />
       )}
 
+      {/* Staff Account Switcher PIN Modal */}
+      <AccountSwitcherModal />
+
+      {/* Registrar Accountability Register & Handover PDF Modal */}
+      <AccountabilityModal />
+
       {/* Global Notifications */}
       <ToastContainer />
     </div>
   );
 };
+
 
 export function App() {
   return (

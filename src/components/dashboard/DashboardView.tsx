@@ -11,7 +11,10 @@ import {
   CheckCircle2, 
   UserPlus, 
   QrCode, 
-  Sparkles 
+  Sparkles,
+  ShieldCheck,
+  FileText,
+  KeyRound
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { db } from '../../db/db';
@@ -21,9 +24,11 @@ interface DashboardViewProps {
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
-  const { settings, openNewReg } = useApp();
+  const { settings, openNewReg, currentAccount, openAccountability, openAccountSwitch } = useApp();
 
   const attendees = useLiveQuery(() => db.attendees.toArray(), []);
+  const payments = useLiveQuery(() => db.payments.toArray(), []);
+
 
   // Compute live aggregates matching Section 13
   const stats = React.useMemo(() => {
@@ -112,6 +117,35 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
     };
   }, [attendees, settings.totalCapacity, settings.adultAgeThreshold]);
 
+  const myStats = React.useMemo(() => {
+    if (!attendees || !payments) return { regCount: 0, cash: 0, digital: 0, total: 0 };
+    const myAtts = attendees.filter(a =>
+      a.registeredBy === currentAccount.displayName ||
+      a.registeredBy === currentAccount.accountCode ||
+      a.registeredBy === currentAccount.username
+    );
+    const myPmts = payments.filter(p =>
+      p.recordedBy === currentAccount.displayName ||
+      p.recordedBy === currentAccount.accountCode ||
+      p.recordedBy === currentAccount.username
+    );
+
+    let cash = 0;
+    let digital = 0;
+    myPmts.forEach(p => {
+      const amt = Number(p.amount) || 0;
+      if (p.paymentMethod === 'Cash') cash += amt;
+      else digital += amt;
+    });
+
+    return {
+      regCount: myAtts.length,
+      cash,
+      digital,
+      total: cash + digital
+    };
+  }, [attendees, payments, currentAccount]);
+
   const capacityPercent = Math.min(100, Math.round((stats.total / stats.capacity) * 100));
   const checkInPercent = stats.total > 0 ? Math.round((stats.checkedIn / stats.total) * 100) : 0;
 
@@ -148,6 +182,68 @@ export const DashboardView: React.FC<DashboardViewProps> = ({ onNavigate }) => {
           </button>
         </div>
       </div>
+
+      {/* Staff Account Accountability Spotlight Card */}
+      <div className="bg-white rounded-2xl p-5 shadow-xs border border-slate-200 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
+        <div className="flex items-center space-x-3">
+          <div className={`w-12 h-12 rounded-xl ${currentAccount.avatarColor} text-white flex items-center justify-center font-black text-sm shadow-xs`}>
+            {currentAccount.accountCode.slice(0, 3)}
+          </div>
+          <div>
+            <div className="flex items-center space-x-2">
+              <h2 className="text-base font-bold text-slate-900">{currentAccount.displayName}</h2>
+              <span className="text-[10px] uppercase font-extrabold px-2 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">
+                {currentAccount.role} • {currentAccount.stationId}
+              </span>
+            </div>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {currentAccount.role === 'ADMIN' 
+                ? 'Full camp master oversight with live registrar audit & reconciliation.' 
+                : 'Registration accountability console for your assigned station.'}
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-3">
+          {currentAccount.role !== 'ADMIN' ? (
+            <>
+              <div className="px-3 py-1.5 rounded-xl bg-slate-50 border border-slate-200 text-xs">
+                <span className="text-[10px] uppercase font-bold text-slate-400 block">My Registrations</span>
+                <span className="font-extrabold text-slate-900 font-mono text-sm">{myStats.regCount}</span>
+              </div>
+              <div className="px-3 py-1.5 rounded-xl bg-emerald-50 border border-emerald-200 text-xs">
+                <span className="text-[10px] uppercase font-bold text-emerald-700 block">Cash in Hand</span>
+                <span className="font-extrabold text-emerald-950 font-mono text-sm">US${myStats.cash.toFixed(2)}</span>
+              </div>
+              <button
+                onClick={() => openAccountability(currentAccount)}
+                className="flex items-center space-x-1.5 px-3.5 py-2 bg-teal-600 hover:bg-teal-500 text-white rounded-xl text-xs font-bold shadow-xs transition"
+              >
+                <FileText className="w-3.5 h-3.5" />
+                <span>My Handover PDF</span>
+              </button>
+            </>
+          ) : (
+            <>
+              <button
+                onClick={() => openAccountability()}
+                className="flex items-center space-x-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-bold shadow-xs transition"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span>Registrar Accountability Registers</span>
+              </button>
+              <button
+                onClick={openAccountSwitch}
+                className="flex items-center space-x-1.5 px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-semibold transition"
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                <span>Switch Staff</span>
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
 
       {/* CAPACITY & ATTENDANCE METER */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">

@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { db, DEFAULT_SETTINGS, getSettings, removeDemoData } from '../db/db';
-import type { AppSettings, Attendee, StaffRole } from '../types';
+import { db, DEFAULT_SETTINGS, getSettings, hydrateFromPersistentJsonDb, syncPersistentJsonDb } from '../db/db';
+import { DEFAULT_ACCOUNT, findAccountById, HARDCODED_ACCOUNTS, verifyAccountPin } from '../db/accounts';
+import type { AppSettings, Attendee, StaffRole, UserAccount } from '../types';
 
 interface Toast {
   id: string;
@@ -19,6 +20,14 @@ interface AppContextType {
   toasts: Toast[];
   showToast: (type: Toast['type'], message: string, title?: string) => void;
   dismissToast: (id: string) => void;
+
+  // Staff Account & Scoping
+  currentAccount: UserAccount;
+  allAccounts: UserAccount[];
+  switchAccount: (accountId: string, pin: string) => boolean;
+  quickSwitchAccountByAdmin: (accountId: string) => void;
+  activeRegistrarFilter: string; // 'ALL' or specific accountCode / displayName
+  setActiveRegistrarFilter: (filter: string) => void;
 
   // Global modals
   receiptAttendee: Attendee | null;
@@ -40,6 +49,15 @@ interface AppContextType {
   isNewRegOpen: boolean;
   openNewReg: () => void;
   closeNewReg: () => void;
+
+  isAccountSwitchOpen: boolean;
+  openAccountSwitch: () => void;
+  closeAccountSwitch: () => void;
+
+  isAccountabilityOpen: boolean;
+  accountabilityTargetAccount: UserAccount | null;
+  openAccountability: (account?: UserAccount) => void;
+  closeAccountability: () => void;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -47,8 +65,24 @@ const AppContext = createContext<AppContextType | undefined>(undefined);
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const [isOnline, setIsOnline] = useState<boolean>(navigator.onLine);
-  const [activeRole, setActiveRoleState] = useState<StaffRole>('ADMIN');
-  const [activeStaffName, setActiveStaffNameState] = useState<string>('Admin');
+
+  // Load saved user account or fallback to Master Admin
+  const [currentAccount, setCurrentAccount] = useState<UserAccount>(() => {
+    try {
+      const savedId = localStorage.getItem('administrare_active_account_id');
+      if (savedId) {
+        const found = findAccountById(savedId);
+        if (found) return found;
+      }
+    } catch (e) {
+      // Local storage unavailable
+    }
+    return DEFAULT_ACCOUNT;
+  });
+
+  const [activeRole, setActiveRoleState] = useState<StaffRole>(currentAccount.role);
+  const [activeStaffName, setActiveStaffNameState] = useState<string>(currentAccount.displayName);
+  const [activeRegistrarFilter, setActiveRegistrarFilter] = useState<string>('ALL');
   const [toasts, setToasts] = useState<Toast[]>([]);
 
   // Modals state
@@ -57,13 +91,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [profileAttendee, setProfileAttendee] = useState<Attendee | null>(null);
   const [printBatchAttendees, setPrintBatchAttendees] = useState<Attendee[] | null>(null);
   const [isNewRegOpen, setIsNewRegOpen] = useState<boolean>(false);
+  const [isAccountSwitchOpen, setIsAccountSwitchOpen] = useState<boolean>(false);
+  const [isAccountabilityOpen, setIsAccountabilityOpen] = useState<boolean>(false);
+  const [accountabilityTargetAccount, setAccountabilityTargetAccount] = useState<UserAccount | null>(null);
 
   const refreshSettings = async () => {
     try {
       const s = await getSettings();
       setSettings(s);
-      setActiveRoleState(s.activeStaffRole || 'ADMIN');
-      setActiveStaffNameState(s.activeStaffName || 'Admin');
     } catch (err) {
       console.error('Failed to load settings:', err);
     }
@@ -82,9 +117,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
 
-    // Initial load: ensure no mock data persists
-    refreshSettings().then(async () => {
-      await removeDemoData();
+    // Initial safe hydration from persistent JSON DB if IndexedDB is empty
+    hydrateFromPersistentJsonDb().then(async (restored) => {
+      if (restored) {
+        showToast('info', 'Database automatically restored from persistent local JSON mirror.', 'Data Restored');
+      }
+      await refreshSettings();
+      await syncPersistentJsonDb();
     });
 
     return () => {
@@ -93,9 +132,57 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
+  const switchAccount = (accountId: string, pin: string): boolean => {
+    const target = findAccountById(accountId);
+    if (!target) {
+      showToast('error', 'Account not found.');
+      return false;
+    }
+
+    const isValid = verifyAccountPin(target, pin);
+    if (!isValid) {
+      showToast('error', 'Incorrect 4-digit PIN for ' + target.displayName, 'Access Denied');
+      return false;
+    }
+
+    setCurrentAccount(target);
+    setActiveRoleState(target.role);
+    setActiveStaffNameState(target.displayName);
+    try {
+      localStorage.setItem('administrare_active_account_id', target.id);
+    } catch (e) {
+      // Ignore
+    }
+
+    db.settings.put({
+      ...settings,
+      activeStaffRole: target.role,
+      activeStaffName: target.displayName,
+      stationId: target.stationId
+    }).catch(console.error);
+
+    showToast('success', `Switched to ${target.displayName} (${target.accountCode})`, 'Account Active');
+    setIsAccountSwitchOpen(false);
+    return true;
+  };
+
+  const quickSwitchAccountByAdmin = (accountId: string) => {
+    const target = findAccountById(accountId);
+    if (!target) return;
+    setCurrentAccount(target);
+    setActiveRoleState(target.role);
+    setActiveStaffNameState(target.displayName);
+    try {
+      localStorage.setItem('administrare_active_account_id', target.id);
+    } catch (e) {
+      // Ignore
+    }
+    showToast('info', `Switched view to ${target.displayName}`);
+  };
+
   const setActiveRole = async (role: StaffRole, name?: string) => {
     setActiveRoleState(role);
-    const newName = name || (role === 'ADMIN' ? 'Admin' : role === 'REGISTRAR' ? 'Registrar 1' : 'Gate Staff 1');
+    const newName = name || (role === 'ADMIN' ? 'Master Admin' : role === 'REGISTRAR' ? 'Registrar' : 'Gate Staff');
     setActiveStaffNameState(newName);
     await db.settings.put({
       ...settings,
@@ -116,6 +203,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setToasts(prev => prev.filter(t => t.id !== id));
   };
 
+  const openAccountability = (account?: UserAccount) => {
+    setAccountabilityTargetAccount(account || currentAccount);
+    setIsAccountabilityOpen(true);
+  };
+
   return (
     <AppContext.Provider
       value={{
@@ -128,6 +220,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         toasts,
         showToast,
         dismissToast,
+        currentAccount,
+        allAccounts: HARDCODED_ACCOUNTS,
+        switchAccount,
+        quickSwitchAccountByAdmin,
+        activeRegistrarFilter,
+        setActiveRegistrarFilter,
         receiptAttendee,
         openReceipt: setReceiptAttendee,
         closeReceipt: () => setReceiptAttendee(null),
@@ -142,7 +240,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         closePrintBatch: () => setPrintBatchAttendees(null),
         isNewRegOpen,
         openNewReg: () => setIsNewRegOpen(true),
-        closeNewReg: () => setIsNewRegOpen(false)
+        closeNewReg: () => setIsNewRegOpen(false),
+        isAccountSwitchOpen,
+        openAccountSwitch: () => setIsAccountSwitchOpen(true),
+        closeAccountSwitch: () => setIsAccountSwitchOpen(false),
+        isAccountabilityOpen,
+        accountabilityTargetAccount,
+        openAccountability,
+        closeAccountability: () => {
+          setIsAccountabilityOpen(false);
+          setAccountabilityTargetAccount(null);
+        }
       }}
     >
       {children}
