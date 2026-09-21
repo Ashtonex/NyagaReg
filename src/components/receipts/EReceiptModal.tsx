@@ -42,45 +42,45 @@ export const EReceiptModal: React.FC<EReceiptModalProps> = ({ attendee, onClose,
   const getCleanPhone = () => {
     if (!attendee.phoneNumber) return '';
     let digits = attendee.phoneNumber.replace(/\D/g, '');
-    // Zimbabwean local phone conversion e.g. 0771234567 -> 263771234567
+    // Zimbabwean local phone conversion e.g. 0771234567 -> 263771234567 or 771234567 -> 263771234567
     if (digits.startsWith('0')) {
       digits = '263' + digits.slice(1);
+    } else if (digits.length === 9 && digits.startsWith('7')) {
+      digits = '263' + digits;
     }
     return digits;
   };
 
-  // Open WhatsApp Web directly (web.whatsapp.com)
-  const handleOpenWhatsAppWeb = () => {
-    const text = getReceiptText();
-    const encoded = encodeURIComponent(text);
-    const phone = getCleanPhone();
-    const url = phone
-      ? `https://web.whatsapp.com/send?phone=${phone}&text=${encoded}`
-      : `https://web.whatsapp.com/send?text=${encoded}`;
-    window.open(url, '_blank', 'noopener,noreferrer');
-    showToast('info', 'Opening WhatsApp Web in new tab...', 'WhatsApp Web');
+  const receiptText = getReceiptText();
+  const encodedText = encodeURIComponent(receiptText);
+  const phone = getCleanPhone();
+
+  // 1. WhatsApp Web URL (trailing slash '/send/?' is required by WhatsApp Web router to keep query params)
+  const whatsAppWebUrl = phone
+    ? `https://web.whatsapp.com/send/?phone=${phone}&text=${encodedText}`
+    : `https://web.whatsapp.com/send/?text=${encodedText}`;
+
+  // 2. WhatsApp Universal Link (opens native WhatsApp app on Android/iOS/Windows without popup blocking)
+  const whatsAppAppUrl = phone
+    ? `https://wa.me/${phone}?text=${encodedText}`
+    : `https://wa.me/?text=${encodedText}`;
+
+  // Click handlers that ensure receipt text is copied to clipboard as backup
+  const handleWhatsAppWebClick = async () => {
+    try {
+      await navigator.clipboard.writeText(receiptText);
+      showToast('success', 'Opening WhatsApp Web. Pass text also copied to clipboard!', 'WhatsApp Web');
+    } catch {
+      showToast('info', 'Opening WhatsApp Web in new tab...', 'WhatsApp Web');
+    }
   };
 
-  // Open native WhatsApp Application (whatsapp:// or fallback to api.whatsapp.com)
-  const handleOpenWhatsAppApp = () => {
-    const text = getReceiptText();
-    const encoded = encodeURIComponent(text);
-    const phone = getCleanPhone();
-    
-    // Scheme for WhatsApp application on Windows / Mac / Android / iOS
-    const appUrl = phone
-      ? `whatsapp://send?phone=${phone}&text=${encoded}`
-      : `whatsapp://send?text=${encoded}`;
-
-    const fallbackUrl = phone
-      ? `https://api.whatsapp.com/send?phone=${phone}&text=${encoded}`
-      : `https://api.whatsapp.com/send?text=${encoded}`;
-
+  const handleWhatsAppAppClick = async () => {
     try {
-      window.location.href = appUrl;
-      showToast('info', 'Launching WhatsApp application...', 'WhatsApp App');
-    } catch (e) {
-      window.open(fallbackUrl, '_blank', 'noopener,noreferrer');
+      await navigator.clipboard.writeText(receiptText);
+      showToast('success', 'Opening WhatsApp. Pass text also copied to clipboard!', 'WhatsApp App');
+    } catch {
+      showToast('info', 'Launching WhatsApp...', 'WhatsApp App');
     }
   };
 
@@ -203,23 +203,29 @@ export const EReceiptModal: React.FC<EReceiptModalProps> = ({ attendee, onClose,
 
           {/* WhatsApp Web & Native App Buttons */}
           <div className="grid grid-cols-2 gap-2">
-            <button
-              onClick={handleOpenWhatsAppWeb}
-              className="flex items-center justify-center space-x-1.5 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer"
+            <a
+              href={whatsAppWebUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={handleWhatsAppWebClick}
+              className="flex items-center justify-center space-x-1.5 py-2 px-3 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer no-underline text-center"
               title="Open directly in WhatsApp Web in browser"
             >
               <Globe className="w-3.5 h-3.5" />
               <span>WhatsApp Web</span>
-            </button>
+            </a>
 
-            <button
-              onClick={handleOpenWhatsAppApp}
-              className="flex items-center justify-center space-x-1.5 py-2 px-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer"
-              title="Open in WhatsApp desktop or mobile application"
+            <a
+              href={whatsAppAppUrl}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={handleWhatsAppAppClick}
+              className="flex items-center justify-center space-x-1.5 py-2 px-3 bg-emerald-700 hover:bg-emerald-800 text-white rounded-xl text-xs font-bold shadow-xs transition active:scale-95 cursor-pointer no-underline text-center"
+              title="Open in WhatsApp application or mobile"
             >
               <Smartphone className="w-3.5 h-3.5" />
               <span>WhatsApp App</span>
-            </button>
+            </a>
           </div>
 
           {/* Copy Text & Print Pass Buttons */}
