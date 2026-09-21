@@ -134,13 +134,13 @@ export const AccountSwitcherModal: React.FC = () => {
             <div className="relative">
               <input
                 type="password"
-                maxLength={6}
+                maxLength={4}
                 value={pin}
                 onChange={e => {
                   setPin(e.target.value);
                   setErrorMsg('');
                 }}
-                placeholder="Enter PIN (e.g. 1001, 2026)"
+                placeholder="••••"
                 autoFocus
                 className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 font-mono text-center text-lg tracking-widest focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
               />
@@ -153,11 +153,6 @@ export const AccountSwitcherModal: React.FC = () => {
                 <span>{errorMsg}</span>
               </div>
             )}
-
-            <div className="text-[11px] text-slate-500 flex items-center justify-between pt-1">
-              <span>PINs: Admin: <b>2026</b> | Acc A: <b>1001</b> | Acc B: <b>1002</b></span>
-              <span className="text-slate-400 font-mono">Master Override: 2026</span>
-            </div>
           </div>
 
           {/* Action Buttons */}

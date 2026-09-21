@@ -17,7 +17,8 @@ import { PaymentModal } from './components/payments/PaymentModal';
 import { AttendeeProfileModal } from './components/attendees/AttendeeProfileModal';
 import { AccountSwitcherModal } from './components/auth/AccountSwitcherModal';
 import { AccountabilityModal } from './components/accountability/AccountabilityModal';
-import type { Attendee } from './types';
+import { LoginGateScreen } from './components/auth/LoginGateScreen';
+import type { Attendee, UserAccount } from './types';
 
 
 const MainContent: React.FC = () => {
@@ -25,6 +26,8 @@ const MainContent: React.FC = () => {
   const [singlePrintAttendee, setSinglePrintAttendee] = useState<Attendee | null>(null);
 
   const {
+    isAuthenticated,
+    loginStaff,
     receiptAttendee,
     closeReceipt,
     paymentAttendee,
@@ -38,6 +41,21 @@ const MainContent: React.FC = () => {
     openReceipt,
     openPayment
   } = useApp();
+
+  const handleLoginSuccess = (account: UserAccount, redirectTab: TabType) => {
+    loginStaff(account);
+    setActiveTab(redirectTab);
+  };
+
+  if (!isAuthenticated) {
+    return (
+      <>
+        <LoginGateScreen onLoginSuccess={handleLoginSuccess} />
+        <ToastContainer />
+      </>
+    );
+  }
+
 
   const handleOpenPrintSingle = (attendee: Attendee) => {
     setSinglePrintAttendee(attendee);

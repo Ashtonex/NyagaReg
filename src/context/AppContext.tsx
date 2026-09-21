@@ -29,7 +29,13 @@ interface AppContextType {
   activeRegistrarFilter: string; // 'ALL' or specific accountCode / displayName
   setActiveRegistrarFilter: (filter: string) => void;
 
+  // Authentication & Session Gate
+  isAuthenticated: boolean;
+  loginStaff: (account: UserAccount) => void;
+  logoutStaff: () => void;
+
   // Global modals
+
   receiptAttendee: Attendee | null;
   openReceipt: (attendee: Attendee) => void;
   closeReceipt: () => void;
@@ -80,10 +86,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return DEFAULT_ACCOUNT;
   });
 
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
+    try {
+      const session = sessionStorage.getItem('administrare_auth_session');
+      return Boolean(session);
+    } catch (e) {
+      return false;
+    }
+  });
+
   const [activeRole, setActiveRoleState] = useState<StaffRole>(currentAccount.role);
   const [activeStaffName, setActiveStaffNameState] = useState<string>(currentAccount.displayName);
   const [activeRegistrarFilter, setActiveRegistrarFilter] = useState<string>('ALL');
   const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const loginStaff = (account: UserAccount) => {
+    setCurrentAccount(account);
+    setActiveRoleState(account.role);
+    setActiveStaffNameState(account.displayName);
+    setIsAuthenticated(true);
+    try {
+      sessionStorage.setItem('administrare_auth_session', account.id);
+      localStorage.setItem('administrare_active_account_id', account.id);
+    } catch (e) {}
+  };
+
+  const logoutStaff = () => {
+    setIsAuthenticated(false);
+    try {
+      sessionStorage.removeItem('administrare_auth_session');
+    } catch (e) {}
+  };
+
 
   // Modals state
   const [receiptAttendee, setReceiptAttendee] = useState<Attendee | null>(null);
@@ -226,6 +260,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         quickSwitchAccountByAdmin,
         activeRegistrarFilter,
         setActiveRegistrarFilter,
+        isAuthenticated,
+        loginStaff,
+        logoutStaff,
         receiptAttendee,
         openReceipt: setReceiptAttendee,
         closeReceipt: () => setReceiptAttendee(null),

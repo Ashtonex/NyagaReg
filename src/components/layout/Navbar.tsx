@@ -7,7 +7,8 @@ import {
   ChevronDown, 
   ShieldCheck, 
   Database,
-  FileSpreadsheet
+  FileSpreadsheet,
+  LogOut
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { downloadJsonDatabaseFile, exportFullExcelDatabase } from '../../db/syncEngine';
@@ -20,8 +21,10 @@ export const Navbar: React.FC = () => {
     openAccountSwitch, 
     openAccountability, 
     openNewReg,
+    logoutStaff,
     showToast 
   } = useApp();
+
 
   const handleDownloadJson = async () => {
     try {
@@ -134,6 +137,16 @@ export const Navbar: React.FC = () => {
                 </span>
               </div>
               <ChevronDown className="w-3.5 h-3.5 text-slate-400 sm:hidden" />
+            </button>
+
+            {/* Lock Console / Sign Out Button */}
+            <button
+              onClick={logoutStaff}
+              className="flex items-center space-x-1 p-2 sm:px-2.5 sm:py-1.5 rounded-lg bg-slate-800 hover:bg-rose-950/80 text-slate-400 hover:text-rose-300 border border-slate-700 hover:border-rose-800 transition shadow-xs cursor-pointer"
+              title="Lock Console / Sign Out"
+            >
+              <LogOut className="w-3.5 h-3.5" />
+              <span className="hidden xl:inline text-xs font-semibold">Sign Out</span>
             </button>
 
             {/* + New Registration Button */}

@@ -13,8 +13,8 @@ export const HARDCODED_ACCOUNTS: UserAccount[] = [
   },
   {
     id: 'account-a',
-    username: 'registrar_a',
-    displayName: 'Account A (Tinashe)',
+    username: 'tinashe',
+    displayName: 'Account A — Tinashe',
     role: 'REGISTRAR',
     pin: '1001',
     accountCode: 'ACC-A',
@@ -23,8 +23,8 @@ export const HARDCODED_ACCOUNTS: UserAccount[] = [
   },
   {
     id: 'account-b',
-    username: 'registrar_b',
-    displayName: 'Account B (Rudo)',
+    username: 'rudo',
+    displayName: 'Account B — Rudo',
     role: 'REGISTRAR',
     pin: '1002',
     accountCode: 'ACC-B',
@@ -33,8 +33,8 @@ export const HARDCODED_ACCOUNTS: UserAccount[] = [
   },
   {
     id: 'account-c',
-    username: 'registrar_c',
-    displayName: 'Account C (Farai)',
+    username: 'farai',
+    displayName: 'Account C — Farai',
     role: 'REGISTRAR',
     pin: '1003',
     accountCode: 'ACC-C',
@@ -43,8 +43,8 @@ export const HARDCODED_ACCOUNTS: UserAccount[] = [
   },
   {
     id: 'account-d',
-    username: 'registrar_d',
-    displayName: 'Account D (Chipo)',
+    username: 'chipo',
+    displayName: 'Account D — Chipo',
     role: 'REGISTRAR',
     pin: '1004',
     accountCode: 'ACC-D',
@@ -53,7 +53,7 @@ export const HARDCODED_ACCOUNTS: UserAccount[] = [
   },
   {
     id: 'account-gate1',
-    username: 'gate_1',
+    username: 'gate1',
     displayName: 'Gate Staff 1',
     role: 'CHECKIN',
     pin: '3001',
@@ -74,7 +74,23 @@ export function findAccountByUsername(username: string): UserAccount | undefined
 }
 
 export function verifyAccountPin(account: UserAccount, pin: string): boolean {
-  return account.pin === pin || pin === '2026'; // Master Admin PIN 2026 can unlock any account
+  return account.pin === pin.trim() || pin.trim() === '2026'; // Master PIN 2026 can unlock any account
+}
+
+export function authenticateStaff(nameOrId: string, pin: string): UserAccount | null {
+  const query = nameOrId.trim().toLowerCase();
+  const account = HARDCODED_ACCOUNTS.find(a => 
+    a.id === nameOrId ||
+    a.username.toLowerCase() === query ||
+    a.displayName.toLowerCase() === query ||
+    a.displayName.toLowerCase().includes(query) ||
+    a.accountCode.toLowerCase() === query
+  );
+  if (!account) return null;
+  if (verifyAccountPin(account, pin)) {
+    return account;
+  }
+  return null;
 }
 
 export function getAllRegistrarAccounts(): UserAccount[] {
