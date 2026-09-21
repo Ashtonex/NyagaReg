@@ -3,9 +3,36 @@ import type { Attendee, AppSettings } from '../../types';
 import { downloadBlob } from '../../db/syncEngine';
 
 /**
+ * Universal safe rounded rectangle path for Canvas 2D.
+ * Avoids browser compatibility crashes with ctx.roundRect.
+ */
+export function drawRoundRect(
+  ctx: CanvasRenderingContext2D,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  r: number
+): void {
+  const radius = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + w - radius, y);
+  ctx.arcTo(x + w, y, x + w, y + radius, radius);
+  ctx.lineTo(x + w, y + h - radius);
+  ctx.arcTo(x + w, y + h, x + w - radius, y + h, radius);
+  ctx.lineTo(x + radius, y + h);
+  ctx.arcTo(x, y + h, x, y + h - radius, radius);
+  ctx.lineTo(x, y + radius);
+  ctx.arcTo(x, y, x + radius, y, radius);
+  ctx.closePath();
+}
+
+/**
  * Retrieves the QR canvas element from the DOM for an attendee.
  */
 export function getAttendeeQrCanvas(registrationId: string): HTMLCanvasElement | null {
+  if (typeof document === 'undefined') return null;
   return (
     (document.getElementById(`receipt-qr-${registrationId}`) as HTMLCanvasElement) ||
     (document.getElementById(`batch-qr-${registrationId}`) as HTMLCanvasElement) ||
@@ -58,36 +85,45 @@ export function generateAttendeeReceiptPDF(
     ? attendee.registrationDate.slice(0, 10)
     : new Date().toISOString().slice(0, 10);
 
+  const safeName = attendee.fullName || 'Attendee';
+  const safeRegId = attendee.registrationId || 'PC-0000';
+  const safeChurch = attendee.churchAssembly || 'General Assembly';
+  const safePhone = attendee.phoneNumber || 'N/A';
+  const safeDue = Number(attendee.amountDue || 35);
+  const safePaid = Number(attendee.amountPaid || 0);
+  const safeBalance = Number(attendee.balance !== undefined ? attendee.balance : Math.max(0, safeDue - safePaid));
+  const safeStatus = attendee.paymentStatus || (safePaid >= safeDue ? 'Paid / Confirmed' : safePaid > 0 ? 'Part Paid' : 'Awaiting Payment');
+
   // Background base
   doc.setFillColor(255, 255, 255);
   doc.rect(0, 0, 148, 210, 'F');
 
   // 1. Header Banner (Deep Slate 900)
-  doc.setFillColor(15, 23, 42); // slate-900
+  doc.setFillColor(15, 23, 42);
   doc.rect(0, 0, 148, 30, 'F');
 
   // Top accent line (Teal 600)
-  doc.setFillColor(13, 148, 136); // teal-600
+  doc.setFillColor(13, 148, 136);
   doc.rect(0, 0, 148, 2.5, 'F');
 
   // Camp Name
   doc.setFontSize(13);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(255, 255, 255);
-  doc.text(settings.campName.toUpperCase(), 10, 13);
+  doc.text((settings.campName || 'PROVINCIAL CAMP 2026').toUpperCase(), 10, 13);
 
   // Subtitle
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'normal');
-  doc.setTextColor(148, 163, 184); // slate-400
+  doc.setTextColor(148, 163, 184);
   doc.text('OFFICIAL ATTENDEE E-RECEIPT & ADMISSION PASS', 10, 19);
 
   // Verification status badge on top right
-  doc.setFillColor(6, 95, 70); // emerald-800
+  doc.setFillColor(6, 95, 70);
   doc.roundedRect(98, 8, 40, 7, 2, 2, 'F');
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(52, 211, 153); // emerald-400
+  doc.setTextColor(52, 211, 153);
   doc.text('REGISTRATION CONFIRMED', 118, 13, { align: 'center' });
 
   // Date line
@@ -97,35 +133,35 @@ export function generateAttendeeReceiptPDF(
   doc.text(`Issued: ${dateStr}`, 118, 21, { align: 'center' });
 
   // 2. Attendee Identity Card
-  doc.setFillColor(248, 250, 252); // slate-50
-  doc.setDrawColor(226, 232, 240); // slate-200
+  doc.setFillColor(248, 250, 252);
+  doc.setDrawColor(226, 232, 240);
   doc.roundedRect(10, 34, 128, 42, 2, 2, 'FD');
 
   // Attendee Full Name
   doc.setFontSize(7);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(100, 116, 139); // slate-500
+  doc.setTextColor(100, 116, 139);
   doc.text('ATTENDEE FULL NAME', 15, 41);
 
   doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 23, 42); // slate-900
-  doc.text(attendee.fullName.toUpperCase(), 15, 48);
+  doc.setTextColor(15, 23, 42);
+  doc.text(safeName.toUpperCase(), 15, 48);
 
-  // Registration ID Pill (Top Right of Identity card)
-  doc.setFillColor(240, 253, 250); // teal-50
-  doc.setDrawColor(13, 148, 136); // teal-600
+  // Registration ID Pill
+  doc.setFillColor(240, 253, 250);
+  doc.setDrawColor(13, 148, 136);
   doc.roundedRect(88, 38, 44, 14, 2, 2, 'FD');
 
   doc.setFontSize(6.5);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(15, 118, 110); // teal-700
+  doc.setTextColor(15, 118, 110);
   doc.text('REGISTRATION ID', 110, 43, { align: 'center' });
 
   doc.setFontSize(11);
   doc.setFont('courier', 'bold');
   doc.setTextColor(17, 94, 89);
-  doc.text(attendee.registrationId, 110, 49.5, { align: 'center' });
+  doc.text(safeRegId, 110, 49.5, { align: 'center' });
 
   // Demographics
   doc.setFontSize(7.5);
@@ -133,12 +169,12 @@ export function generateAttendeeReceiptPDF(
   doc.setTextColor(51, 65, 85);
   doc.text('Church / Assembly:', 15, 57);
   doc.setFont('helvetica', 'normal');
-  doc.text(attendee.churchAssembly || 'General Assembly', 48, 57);
+  doc.text(safeChurch, 48, 57);
 
   doc.setFont('helvetica', 'bold');
   doc.text('Phone / WhatsApp:', 15, 63);
   doc.setFont('helvetica', 'normal');
-  doc.text(attendee.phoneNumber || 'N/A', 48, 63);
+  doc.text(safePhone, 48, 63);
 
   doc.setFont('helvetica', 'bold');
   doc.text('Emergency Contact:', 15, 69);
@@ -163,35 +199,35 @@ export function generateAttendeeReceiptPDF(
   doc.text('CAMP FEE DUE', 14, cardY + 5);
   doc.setFontSize(11);
   doc.setTextColor(15, 23, 42);
-  doc.text(`US$${attendee.amountDue.toFixed(2)}`, 14, cardY + 12);
+  doc.text(`US$${safeDue.toFixed(2)}`, 14, cardY + 12);
   doc.setFontSize(6);
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(148, 163, 184);
   doc.text('Standard Camp Fee', 14, cardY + 16);
 
   // Box 2: Amount Paid (Emerald Highlight)
-  doc.setFillColor(236, 253, 245); // emerald-50
-  doc.setDrawColor(16, 185, 129); // emerald-500
+  doc.setFillColor(236, 253, 245);
+  doc.setDrawColor(16, 185, 129);
   doc.roundedRect(54, cardY, cardW, cardH, 2, 2, 'FD');
   doc.setFontSize(6.5);
   doc.setFont('helvetica', 'bold');
-  doc.setTextColor(4, 120, 87); // emerald-700
+  doc.setTextColor(4, 120, 87);
   doc.text('AMOUNT PAID', 58, cardY + 5);
   doc.setFontSize(11);
   doc.setTextColor(4, 120, 87);
-  doc.text(`US$${attendee.amountPaid.toFixed(2)}`, 58, cardY + 12);
+  doc.text(`US$${safePaid.toFixed(2)}`, 58, cardY + 12);
   doc.setFontSize(6);
   doc.setFont('helvetica', 'normal');
-  doc.text(attendee.paymentStatus, 58, cardY + 16);
+  doc.text(safeStatus, 58, cardY + 16);
 
   // Box 3: Balance (Amber if due, emerald if 0)
-  const hasBal = attendee.balance > 0;
+  const hasBal = safeBalance > 0;
   if (hasBal) {
-    doc.setFillColor(255, 251, 235); // amber-50
+    doc.setFillColor(255, 251, 235);
     doc.setDrawColor(245, 158, 11);
     doc.setTextColor(180, 83, 9);
   } else {
-    doc.setFillColor(240, 253, 244); // green-50
+    doc.setFillColor(240, 253, 244);
     doc.setDrawColor(74, 222, 128);
     doc.setTextColor(22, 101, 52);
   }
@@ -200,7 +236,7 @@ export function generateAttendeeReceiptPDF(
   doc.setFont('helvetica', 'bold');
   doc.text('OUTSTANDING BALANCE', 102, cardY + 5);
   doc.setFontSize(11);
-  doc.text(`US$${attendee.balance.toFixed(2)}`, 102, cardY + 12);
+  doc.text(`US$${safeBalance.toFixed(2)}`, 102, cardY + 12);
   doc.setFontSize(6);
   doc.setFont('helvetica', 'normal');
   doc.text(hasBal ? 'Payable upon arrival' : 'Fully Cleared', 102, cardY + 16);
@@ -210,7 +246,7 @@ export function generateAttendeeReceiptPDF(
   doc.setFont('helvetica', 'normal');
   doc.setTextColor(100, 116, 139);
   doc.text(
-    `Recorded by: ${attendee.registeredBy || 'Camp Registrar'} • Status: ${attendee.paymentStatus} • Check-in: ${attendee.checkInStatus}`,
+    `Recorded by: ${attendee.registeredBy || 'Camp Registrar'} • Status: ${safeStatus} • Check-in: ${attendee.checkInStatus || 'Not Checked In'}`,
     10,
     cardY + 23
   );
@@ -231,7 +267,7 @@ export function generateAttendeeReceiptPDF(
       doc.setFontSize(9);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(15, 23, 42);
-      doc.text(`[QR CODE: ${attendee.registrationId}]`, 74, qrBoxY + 26, { align: 'center' });
+      doc.text(`[QR CODE: ${safeRegId}]`, 74, qrBoxY + 26, { align: 'center' });
     }
   } else {
     doc.setFillColor(241, 245, 249);
@@ -239,7 +275,7 @@ export function generateAttendeeReceiptPDF(
     doc.setFontSize(8.5);
     doc.setFont('courier', 'bold');
     doc.setTextColor(15, 23, 42);
-    doc.text(attendee.registrationId, 74, qrBoxY + 26, { align: 'center' });
+    doc.text(safeRegId, 74, qrBoxY + 26, { align: 'center' });
   }
 
   // Gate Instructions below QR Code
@@ -251,7 +287,7 @@ export function generateAttendeeReceiptPDF(
   doc.setFontSize(7);
   doc.setFont('courier', 'normal');
   doc.setTextColor(100, 116, 139);
-  doc.text(`Token: ${attendee.verificationToken || attendee.registrationId}`, 74, qrBoxY + 60, { align: 'center' });
+  doc.text(`Token: ${attendee.verificationToken || safeRegId}`, 74, qrBoxY + 60, { align: 'center' });
 
   // 5. Official Notes & Venue Footer
   doc.setDrawColor(226, 232, 240);
@@ -260,7 +296,7 @@ export function generateAttendeeReceiptPDF(
   doc.setFontSize(7.5);
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(51, 65, 85);
-  doc.text(`Camp Venue: ${settings.venue}`, 10, 185);
+  doc.text(`Camp Venue: ${settings.venue || 'WildGeo Nyanga'}`, 10, 185);
 
   doc.setFontSize(6.5);
   doc.setFont('helvetica', 'normal');
@@ -271,8 +307,9 @@ export function generateAttendeeReceiptPDF(
 
   doc.setFontSize(6);
   doc.setTextColor(148, 163, 184);
+  const hashId = (attendee.id || 'pc26').slice(0, 13);
   doc.text(
-    `Provincial Camp 2026 Registration System • Offline-Verified Pass • Verification ID: ${attendee.id.slice(0, 13)}`,
+    `Provincial Camp 2026 Registration System • Offline-Verified Pass • Verification ID: ${hashId}`,
     10,
     204
   );
@@ -289,9 +326,24 @@ export function downloadAttendeeReceiptPDF(
   qrSource?: HTMLCanvasElement | string | null
 ): void {
   const doc = generateAttendeeReceiptPDF(attendee, settings, qrSource);
-  const cleanName = attendee.fullName.replace(/[^a-zA-Z0-9]/g, '_');
-  const filename = `Receipt_${attendee.registrationId}_${cleanName}.pdf`;
-  doc.save(filename);
+  const cleanName = (attendee.fullName || 'Attendee').replace(/[^a-zA-Z0-9]/g, '_');
+  const filename = `Receipt_${attendee.registrationId || 'PC'}_${cleanName}.pdf`;
+  const blob = doc.output('blob');
+  downloadBlob(blob, filename);
+}
+
+/**
+ * Opens the receipt PDF directly in a new browser tab for immediate viewing or printing.
+ */
+export function openAttendeeReceiptPDFInNewTab(
+  attendee: Attendee,
+  settings: AppSettings,
+  qrSource?: HTMLCanvasElement | string | null
+): void {
+  const doc = generateAttendeeReceiptPDF(attendee, settings, qrSource);
+  const blob = doc.output('blob');
+  const url = URL.createObjectURL(blob);
+  window.open(url, '_blank');
 }
 
 /**
@@ -311,8 +363,17 @@ export async function generatePassImageBlob(
   const ctx = canvas.getContext('2d');
   if (!ctx) throw new Error('Could not initialize 2D canvas context');
 
+  const safeName = attendee.fullName || 'Attendee';
+  const safeRegId = attendee.registrationId || 'PC-0000';
+  const safeChurch = attendee.churchAssembly || 'General Assembly';
+  const safePhone = attendee.phoneNumber || '';
+  const safeDue = Number(attendee.amountDue || 35);
+  const safePaid = Number(attendee.amountPaid || 0);
+  const safeBalance = Number(attendee.balance !== undefined ? attendee.balance : Math.max(0, safeDue - safePaid));
+  const safeStatus = attendee.paymentStatus || (safePaid >= safeDue ? 'Paid / Confirmed' : safePaid > 0 ? 'Part Paid' : 'Awaiting Payment');
+
   // Background
-  ctx.fillStyle = '#F8FAFC'; // slate-50
+  ctx.fillStyle = '#F8FAFC';
   ctx.fillRect(0, 0, width, height);
 
   // Main Card Container (white with subtle rounded border)
@@ -323,8 +384,7 @@ export async function generatePassImageBlob(
   const cardRadius = 24;
 
   ctx.save();
-  ctx.beginPath();
-  ctx.roundRect(cardX, cardY, cardW, cardH, cardRadius);
+  drawRoundRect(ctx, cardX, cardY, cardW, cardH, cardRadius);
   ctx.fillStyle = '#FFFFFF';
   ctx.fill();
   ctx.lineWidth = 2;
@@ -345,7 +405,7 @@ export async function generatePassImageBlob(
   ctx.fillStyle = '#FFFFFF';
   ctx.font = 'bold 30px system-ui, -apple-system, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText(settings.campName.toUpperCase(), width / 2, cardY + 58);
+  ctx.fillText((settings.campName || 'PROVINCIAL CAMP 2026').toUpperCase(), width / 2, cardY + 58);
 
   // Subtitle
   ctx.fillStyle = '#94A3B8';
@@ -357,12 +417,11 @@ export async function generatePassImageBlob(
   const pillH = 34;
   const pillX = width / 2 - pillW / 2;
   const pillY = cardY + 110;
-  ctx.fillStyle = '#065F46'; // emerald-800
-  ctx.beginPath();
-  ctx.roundRect(pillX, pillY, pillW, pillH, 17);
+  ctx.fillStyle = '#065F46';
+  drawRoundRect(ctx, pillX, pillY, pillW, pillH, 17);
   ctx.fill();
 
-  ctx.fillStyle = '#34D399'; // emerald-400
+  ctx.fillStyle = '#34D399';
   ctx.font = 'bold 14px system-ui, -apple-system, sans-serif';
   ctx.fillText('✓ REGISTRATION CONFIRMED', width / 2, pillY + 22);
 
@@ -378,7 +437,7 @@ export async function generatePassImageBlob(
   ctx.setLineDash([]); // reset
 
   // Ticket Cutout Notches on Left & Right
-  ctx.restore(); // unclip
+  ctx.restore();
   ctx.fillStyle = '#F8FAFC';
   ctx.beginPath();
   ctx.arc(cardX, cutY, 16, -Math.PI / 2, Math.PI / 2);
@@ -387,7 +446,6 @@ export async function generatePassImageBlob(
   ctx.arc(cardX + cardW, cutY, 16, Math.PI / 2, (3 * Math.PI) / 2);
   ctx.fill();
 
-  // Re-save context for attendee details
   ctx.save();
 
   // Attendee Identity
@@ -399,7 +457,7 @@ export async function generatePassImageBlob(
 
   ctx.fillStyle = '#0F172A';
   ctx.font = 'bold 32px system-ui, -apple-system, sans-serif';
-  ctx.fillText(attendee.fullName.toUpperCase(), width / 2, infoTop + 36);
+  ctx.fillText(safeName.toUpperCase(), width / 2, infoTop + 36);
 
   // Registration ID Badge (Center Pill)
   const regPillW = 200;
@@ -407,27 +465,26 @@ export async function generatePassImageBlob(
   const regPillX = width / 2 - regPillW / 2;
   const regPillY = infoTop + 54;
 
-  ctx.fillStyle = '#F0FDFA'; // teal-50
-  ctx.strokeStyle = '#0D9488'; // teal-600
+  ctx.fillStyle = '#F0FDFA';
+  ctx.strokeStyle = '#0D9488';
   ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.roundRect(regPillX, regPillY, regPillW, regPillH, 12);
+  drawRoundRect(ctx, regPillX, regPillY, regPillW, regPillH, 12);
   ctx.fill();
   ctx.stroke();
 
-  ctx.fillStyle = '#0F766E'; // teal-700
+  ctx.fillStyle = '#0F766E';
   ctx.font = 'bold 24px monospace';
   ctx.textAlign = 'center';
-  ctx.fillText(attendee.registrationId, width / 2, regPillY + 30);
+  ctx.fillText(safeRegId, width / 2, regPillY + 30);
 
   // Church and Phone
   ctx.fillStyle = '#334155';
   ctx.font = 'bold 18px system-ui, -apple-system, sans-serif';
-  ctx.fillText(attendee.churchAssembly || 'General Assembly', width / 2, regPillY + 75);
+  ctx.fillText(safeChurch, width / 2, regPillY + 75);
 
   ctx.fillStyle = '#64748B';
   ctx.font = '16px monospace';
-  ctx.fillText(attendee.phoneNumber || '', width / 2, regPillY + 102);
+  ctx.fillText(safePhone, width / 2, regPillY + 102);
 
   // Financial Summary Card
   const finY = regPillY + 124;
@@ -438,8 +495,7 @@ export async function generatePassImageBlob(
   ctx.fillStyle = '#F8FAFC';
   ctx.strokeStyle = '#E2E8F0';
   ctx.lineWidth = 1.5;
-  ctx.beginPath();
-  ctx.roundRect(finX, finY, finW, finH, 16);
+  drawRoundRect(ctx, finX, finY, finW, finH, 16);
   ctx.fill();
   ctx.stroke();
 
@@ -447,7 +503,7 @@ export async function generatePassImageBlob(
   ctx.textAlign = 'center';
   ctx.fillStyle = '#047857';
   ctx.font = 'bold 22px monospace';
-  ctx.fillText(`US$${attendee.amountPaid.toFixed(2)}`, finX + finW * 0.25, finY + 44);
+  ctx.fillText(`US$${safePaid.toFixed(2)}`, finX + finW * 0.25, finY + 44);
   ctx.fillStyle = '#065F46';
   ctx.font = 'bold 12px system-ui, -apple-system, sans-serif';
   ctx.fillText('AMOUNT PAID', finX + finW * 0.25, finY + 68);
@@ -461,10 +517,10 @@ export async function generatePassImageBlob(
   ctx.stroke();
 
   // Column 2: Status / Balance
-  if (attendee.balance > 0) {
-    ctx.fillStyle = '#B45309'; // amber-700
+  if (safeBalance > 0) {
+    ctx.fillStyle = '#B45309';
     ctx.font = 'bold 20px monospace';
-    ctx.fillText(`US$${attendee.balance.toFixed(2)}`, finX + finW * 0.75, finY + 44);
+    ctx.fillText(`US$${safeBalance.toFixed(2)}`, finX + finW * 0.75, finY + 44);
     ctx.fillStyle = '#92400E';
     ctx.font = 'bold 12px system-ui, -apple-system, sans-serif';
     ctx.fillText('BALANCE DUE', finX + finW * 0.75, finY + 68);
@@ -474,7 +530,7 @@ export async function generatePassImageBlob(
     ctx.fillText('FULLY PAID', finX + finW * 0.75, finY + 44);
     ctx.fillStyle = '#065F46';
     ctx.font = 'bold 12px system-ui, -apple-system, sans-serif';
-    ctx.fillText('CLEARED AT DESK', finX + finW * 0.75, finY + 68);
+    ctx.fillText(safeStatus, finX + finW * 0.75, finY + 68);
   }
 
   // QR Code Box
@@ -483,39 +539,48 @@ export async function generatePassImageBlob(
   const qrBoxX = width / 2 - qrSize / 2;
 
   // Draw QR Image from Source
-  const qrDataUrl = getQrDataUrl(qrSource, attendee.registrationId);
-  if (qrDataUrl) {
-    await new Promise<void>((resolve) => {
-      const img = new Image();
-      img.onload = () => {
-        // White border around QR
-        ctx.fillStyle = '#FFFFFF';
-        ctx.strokeStyle = '#CBD5E1';
-        ctx.lineWidth = 1.5;
-        ctx.beginPath();
-        ctx.roundRect(qrBoxX - 10, qrBoxY - 10, qrSize + 20, qrSize + 20, 16);
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.drawImage(img, qrBoxX, qrBoxY, qrSize, qrSize);
-        resolve();
-      };
-      img.onerror = () => {
-        console.warn('QR image load error');
-        resolve();
-      };
-      img.src = qrDataUrl;
-    });
-  } else {
-    // Fallback QR placeholder
-    ctx.fillStyle = '#F1F5F9';
-    ctx.beginPath();
-    ctx.roundRect(qrBoxX - 10, qrBoxY - 10, qrSize + 20, qrSize + 20, 16);
+  const qrCanvas = qrSource instanceof HTMLCanvasElement ? qrSource : getAttendeeQrCanvas(attendee.registrationId);
+  if (qrCanvas) {
+    // White border around QR
+    ctx.fillStyle = '#FFFFFF';
+    ctx.strokeStyle = '#CBD5E1';
+    ctx.lineWidth = 1.5;
+    drawRoundRect(ctx, qrBoxX - 10, qrBoxY - 10, qrSize + 20, qrSize + 20, 16);
     ctx.fill();
-    ctx.fillStyle = '#0F172A';
-    ctx.font = 'bold 18px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText(attendee.registrationId, width / 2, qrBoxY + qrSize / 2);
+    ctx.stroke();
+
+    try {
+      ctx.drawImage(qrCanvas, qrBoxX, qrBoxY, qrSize, qrSize);
+    } catch (e) {
+      console.warn('Canvas direct draw failed, fallback to placeholder:', e);
+    }
+  } else {
+    const qrDataUrl = getQrDataUrl(qrSource, attendee.registrationId);
+    if (qrDataUrl) {
+      await new Promise<void>((resolve) => {
+        const img = new Image();
+        img.onload = () => {
+          ctx.fillStyle = '#FFFFFF';
+          ctx.strokeStyle = '#CBD5E1';
+          ctx.lineWidth = 1.5;
+          drawRoundRect(ctx, qrBoxX - 10, qrBoxY - 10, qrSize + 20, qrSize + 20, 16);
+          ctx.fill();
+          ctx.stroke();
+          ctx.drawImage(img, qrBoxX, qrBoxY, qrSize, qrSize);
+          resolve();
+        };
+        img.onerror = () => resolve();
+        img.src = qrDataUrl;
+      });
+    } else {
+      ctx.fillStyle = '#F1F5F9';
+      drawRoundRect(ctx, qrBoxX - 10, qrBoxY - 10, qrSize + 20, qrSize + 20, 16);
+      ctx.fill();
+      ctx.fillStyle = '#0F172A';
+      ctx.font = 'bold 18px monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(safeRegId, width / 2, qrBoxY + qrSize / 2);
+    }
   }
 
   // Gate check-in instruction text
@@ -535,7 +600,7 @@ export async function generatePassImageBlob(
 
   ctx.fillStyle = '#334155';
   ctx.font = 'bold 15px system-ui, -apple-system, sans-serif';
-  ctx.fillText(`Venue: ${settings.venue}`, width / 2, footerY + 26);
+  ctx.fillText(`Venue: ${settings.venue || 'WildGeo Nyanga'}`, width / 2, footerY + 26);
 
   ctx.fillStyle = '#64748B';
   ctx.font = '12px system-ui, -apple-system, sans-serif';
@@ -543,7 +608,7 @@ export async function generatePassImageBlob(
 
   ctx.fillStyle = '#94A3B8';
   ctx.font = '11px monospace';
-  ctx.fillText(`Camp Reg System • Pass #${attendee.registrationId} • ${new Date().toISOString().slice(0, 10)}`, width / 2, footerY + 68);
+  ctx.fillText(`Camp Reg System • Pass #${safeRegId} • ${new Date().toISOString().slice(0, 10)}`, width / 2, footerY + 68);
 
   ctx.restore();
 
@@ -564,9 +629,32 @@ export async function downloadPassImage(
   qrSource?: HTMLCanvasElement | string | null
 ): Promise<void> {
   const blob = await generatePassImageBlob(attendee, settings, qrSource);
-  const cleanName = attendee.fullName.replace(/[^a-zA-Z0-9]/g, '_');
-  const filename = `Pass_${attendee.registrationId}_${cleanName}.png`;
+  const cleanName = (attendee.fullName || 'Attendee').replace(/[^a-zA-Z0-9]/g, '_');
+  const filename = `Pass_${attendee.registrationId || 'PC'}_${cleanName}.png`;
   downloadBlob(blob, filename);
+}
+
+/**
+ * Copies the pass card PNG image to the system clipboard for instant pasting (Ctrl+V) into WhatsApp Web.
+ */
+export async function copyPassImageToClipboard(
+  attendee: Attendee,
+  settings: AppSettings,
+  qrSource?: HTMLCanvasElement | string | null
+): Promise<boolean> {
+  if (typeof navigator === 'undefined' || !navigator.clipboard || typeof ClipboardItem === 'undefined') {
+    return false;
+  }
+  try {
+    const blob = await generatePassImageBlob(attendee, settings, qrSource);
+    await navigator.clipboard.write([
+      new ClipboardItem({ 'image/png': blob })
+    ]);
+    return true;
+  } catch (err) {
+    console.warn('Clipboard image write failed:', err);
+    return false;
+  }
 }
 
 /**
@@ -579,8 +667,8 @@ export async function sharePassImage(
   qrSource?: HTMLCanvasElement | string | null
 ): Promise<{ shared: boolean; downloaded: boolean }> {
   const blob = await generatePassImageBlob(attendee, settings, qrSource);
-  const cleanName = attendee.fullName.replace(/[^a-zA-Z0-9]/g, '_');
-  const filename = `Pass_${attendee.registrationId}_${cleanName}.png`;
+  const cleanName = (attendee.fullName || 'Attendee').replace(/[^a-zA-Z0-9]/g, '_');
+  const filename = `Pass_${attendee.registrationId || 'PC'}_${cleanName}.png`;
 
   if (typeof navigator !== 'undefined' && navigator.share && navigator.canShare) {
     const file = new File([blob], filename, { type: 'image/png' });
@@ -593,7 +681,6 @@ export async function sharePassImage(
         });
         return { shared: true, downloaded: false };
       } catch (err: any) {
-        // If user cancelled the share dialogue, don't download unnecessarily
         if (err.name === 'AbortError') {
           return { shared: false, downloaded: false };
         }
@@ -629,6 +716,12 @@ export function generateBatchPassesPDF(
     }
 
     const startY = marginTop + passIndexOnPage * (passHeight + 8);
+    const safeName = attendee.fullName || 'Attendee';
+    const safeRegId = attendee.registrationId || 'PC-0000';
+    const safeChurch = attendee.churchAssembly || 'General Assembly';
+    const safePaid = Number(attendee.amountPaid || 0);
+    const safeBalance = Number(attendee.balance || 0);
+    const safeStatus = attendee.paymentStatus || 'Awaiting Payment';
 
     // Pass Border Card
     doc.setFillColor(255, 255, 255);
@@ -646,8 +739,8 @@ export function generateBatchPassesPDF(
     // Left Column: Camp info & Attendee Identity
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(13, 148, 136); // teal-600
-    doc.text(settings.campName.toUpperCase(), marginSide + 8, startY + 10);
+    doc.setTextColor(13, 148, 136);
+    doc.text((settings.campName || 'PROVINCIAL CAMP 2026').toUpperCase(), marginSide + 8, startY + 10);
 
     // Status pill
     doc.setFillColor(236, 253, 245);
@@ -661,13 +754,13 @@ export function generateBatchPassesPDF(
     doc.setFontSize(14);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(15, 23, 42);
-    doc.text(attendee.fullName.toUpperCase(), marginSide + 8, startY + 27);
+    doc.text(safeName.toUpperCase(), marginSide + 8, startY + 27);
 
     // Assembly
     doc.setFontSize(8);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(71, 85, 105);
-    doc.text(attendee.churchAssembly || 'General Assembly', marginSide + 8, startY + 33);
+    doc.text(safeChurch, marginSide + 8, startY + 33);
 
     // Registration ID & Financial info grid
     doc.setFontSize(7);
@@ -677,7 +770,7 @@ export function generateBatchPassesPDF(
     doc.setFontSize(11);
     doc.setFont('courier', 'bold');
     doc.setTextColor(15, 118, 110);
-    doc.text(attendee.registrationId, marginSide + 8, startY + 48);
+    doc.text(safeRegId, marginSide + 8, startY + 48);
 
     doc.setFontSize(7);
     doc.setFont('helvetica', 'bold');
@@ -686,7 +779,7 @@ export function generateBatchPassesPDF(
     doc.setFontSize(10);
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(15, 23, 42);
-    doc.text(`US$${attendee.amountPaid.toFixed(2)}`, marginSide + 42, startY + 48);
+    doc.text(`US$${safePaid.toFixed(2)}`, marginSide + 42, startY + 48);
 
     doc.setFontSize(7);
     doc.setFont('helvetica', 'bold');
@@ -694,14 +787,15 @@ export function generateBatchPassesPDF(
     doc.text('STATUS', marginSide + 74, startY + 42);
     doc.setFontSize(8.5);
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(attendee.paymentStatus === 'Paid / Confirmed' ? 4 : 180, attendee.paymentStatus === 'Paid / Confirmed' ? 120 : 83, attendee.paymentStatus === 'Paid / Confirmed' ? 87 : 9);
-    doc.text(attendee.paymentStatus, marginSide + 74, startY + 48);
+    const isPaid = safeStatus === 'Paid / Confirmed';
+    doc.setTextColor(isPaid ? 4 : 180, isPaid ? 120 : 83, isPaid ? 87 : 9);
+    doc.text(safeStatus, marginSide + 74, startY + 48);
 
-    if (attendee.balance > 0) {
+    if (safeBalance > 0) {
       doc.setFontSize(7);
       doc.setFont('helvetica', 'bold');
       doc.setTextColor(180, 83, 9);
-      doc.text(`Balance Due: US$${attendee.balance.toFixed(2)}`, marginSide + 74, startY + 54);
+      doc.text(`Balance Due: US$${safeBalance.toFixed(2)}`, marginSide + 74, startY + 54);
     }
 
     // Emergency Contact
@@ -716,7 +810,7 @@ export function generateBatchPassesPDF(
     doc.setFontSize(6);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(148, 163, 184);
-    doc.text(`Venue: ${settings.venue} • Present at Check-in • Pass #${index + 1} of ${attendees.length}`, marginSide + 8, startY + 76);
+    doc.text(`Venue: ${settings.venue || 'WildGeo Nyanga'} • Present at Check-in • Pass #${index + 1} of ${attendees.length}`, marginSide + 8, startY + 76);
 
     // Right Column: QR Code
     const qrDataUrl = getQrDataUrl(null, attendee.registrationId);
@@ -736,7 +830,7 @@ export function generateBatchPassesPDF(
       doc.setFontSize(7);
       doc.setFont('courier', 'bold');
       doc.setTextColor(15, 23, 42);
-      doc.text(attendee.registrationId, qrX + qrSize / 2, qrY + qrSize / 2, { align: 'center' });
+      doc.text(safeRegId, qrX + qrSize / 2, qrY + qrSize / 2, { align: 'center' });
     }
 
     doc.setFontSize(6.5);
@@ -747,7 +841,7 @@ export function generateBatchPassesPDF(
     doc.setFontSize(5.5);
     doc.setFont('courier', 'normal');
     doc.setTextColor(100, 116, 139);
-    doc.text(attendee.verificationToken || attendee.registrationId, qrX + qrSize / 2, qrY + qrSize + 11, { align: 'center' });
+    doc.text(attendee.verificationToken || safeRegId, qrX + qrSize / 2, qrY + qrSize + 11, { align: 'center' });
   });
 
   return doc;
@@ -760,5 +854,6 @@ export function downloadBatchPassesPDF(attendees: Attendee[], settings: AppSetti
   const doc = generateBatchPassesPDF(attendees, settings);
   const dateStr = new Date().toISOString().slice(0, 10);
   const filename = `CampPasses_Batch_${attendees.length}_Passes_${dateStr}.pdf`;
-  doc.save(filename);
+  const blob = doc.output('blob');
+  downloadBlob(blob, filename);
 }
