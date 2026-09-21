@@ -30,9 +30,12 @@ export function getSupabaseConfig(): SupabaseConfig {
     // Ignore storage read error
   }
 
-  // Fallback to environment variables
-  const envUrl = (import.meta.env.VITE_SUPABASE_URL || '').trim();
-  const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || '').trim();
+  // Fallback to environment variables or pre-configured Nyanga Camp project credentials
+  const defaultUrl = 'https://srrlvqxfgwmkkuethbmj.supabase.co';
+  const defaultKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNycmx2cXhmZ3dta2t1ZXRoYm1qIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTAwMjA0MzksImV4cCI6MjEwNTU5NjQzOX0.oHsNJK6PbU1Asvyapja1bpecXTxfiIezmHQDsBP4Nzc';
+
+  const envUrl = (import.meta.env.VITE_SUPABASE_URL || defaultUrl).trim();
+  const envKey = (import.meta.env.VITE_SUPABASE_ANON_KEY || defaultKey).trim();
 
   return {
     url: envUrl,
