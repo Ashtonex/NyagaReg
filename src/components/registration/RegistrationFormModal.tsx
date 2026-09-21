@@ -20,6 +20,11 @@ import {
   logAuditEvent,
   syncPersistentJsonDb
 } from '../../db/db';
+import { 
+  syncSingleAttendeeToSupabase, 
+  syncSinglePaymentToSupabase, 
+  syncSequenceToSupabase 
+} from '../../db/supabaseSync';
 import type { Attendee, PaymentTransaction } from '../../types';
 
 interface RegistrationFormModalProps {
@@ -253,8 +258,9 @@ export const RegistrationFormModal: React.FC<RegistrationFormModalProps> = ({ is
       await db.attendees.add(newAttendee);
 
       // Append-only payment ledger transaction
+      let createdPaymentTx: PaymentTransaction | null = null;
       if (paidVal > 0) {
-        const paymentTx: PaymentTransaction = {
+        createdPaymentTx = {
           id: crypto.randomUUID(),
           attendeeId: newAttendee.id,
           registrationId: newAttendee.registrationId,
@@ -268,7 +274,7 @@ export const RegistrationFormModal: React.FC<RegistrationFormModalProps> = ({ is
           syncStatus: 'Saved Locally',
           stationId: settings.stationId
         };
-        await db.payments.add(paymentTx);
+        await db.payments.add(createdPaymentTx);
         await logAuditEvent('Payment recorded', `Payment recorded: US$${paidVal.toFixed(2)} via ${paymentMethod}`, newAttendee.registrationId, newAttendee.id);
       }
 
@@ -281,6 +287,13 @@ export const RegistrationFormModal: React.FC<RegistrationFormModalProps> = ({ is
 
       // Immediately sync to persistent JSON database in localStorage
       await syncPersistentJsonDb();
+
+      // Push real-time to Supabase cloud database if configured
+      syncSingleAttendeeToSupabase(newAttendee).catch(console.warn);
+      if (createdPaymentTx) {
+        syncSinglePaymentToSupabase(createdPaymentTx).catch(console.warn);
+      }
+      db.sequences.get('reg_id_sequence').then(s => s && syncSequenceToSupabase(s)).catch(console.warn);
 
       confetti({
         particleCount: 80,

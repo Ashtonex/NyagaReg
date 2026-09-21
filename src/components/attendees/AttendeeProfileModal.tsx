@@ -14,7 +14,8 @@ import {
   History 
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { db, logAuditEvent } from '../../db/db';
+import { db, logAuditEvent, syncPersistentJsonDb } from '../../db/db';
+import { syncSingleAttendeeToSupabase } from '../../db/supabaseSync';
 import type { Attendee } from '../../types';
 
 interface AttendeeProfileModalProps {
@@ -72,6 +73,8 @@ export const AttendeeProfileModal: React.FC<AttendeeProfileModalProps> = ({
         updatedAt: now.toISOString()
       });
       await logAuditEvent('Checked in', `Checked in ${attendee.fullName} from profile view`, attendee.registrationId, attendee.id);
+      await syncPersistentJsonDb();
+      db.attendees.get(attendee.id).then(a => a && syncSingleAttendeeToSupabase(a)).catch(console.warn);
       showToast('success', `${attendee.fullName} marked as Checked In!`);
       onClose();
     } catch (err: any) {
@@ -105,6 +108,8 @@ export const AttendeeProfileModal: React.FC<AttendeeProfileModalProps> = ({
         attendee.id,
         { undoReason: undoReason.trim() }
       );
+      await syncPersistentJsonDb();
+      db.attendees.get(attendee.id).then(a => a && syncSingleAttendeeToSupabase(a)).catch(console.warn);
       showToast('info', `Check-in reversed for ${attendee.fullName}`);
       setShowUndoModal(false);
       setUndoReason('');
@@ -140,6 +145,8 @@ export const AttendeeProfileModal: React.FC<AttendeeProfileModalProps> = ({
         attendee.id,
         { cancellationReason: cancelReason.trim() }
       );
+      await syncPersistentJsonDb();
+      db.attendees.get(attendee.id).then(a => a && syncSingleAttendeeToSupabase(a)).catch(console.warn);
       showToast('warning', `Registration ${attendee.registrationId} marked as Cancelled`);
       setShowCancelModal(false);
       setCancelReason('');
@@ -159,6 +166,8 @@ export const AttendeeProfileModal: React.FC<AttendeeProfileModalProps> = ({
         updatedAt: now
       });
       await logAuditEvent('Record updated', `Updated contact details for ${attendee.fullName}`, attendee.registrationId, attendee.id);
+      await syncPersistentJsonDb();
+      db.attendees.get(attendee.id).then(a => a && syncSingleAttendeeToSupabase(a)).catch(console.warn);
       showToast('success', 'Attendee details updated successfully');
       setIsEditing(false);
     } catch (err: any) {

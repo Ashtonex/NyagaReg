@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { db, DEFAULT_SETTINGS, getSettings, hydrateFromPersistentJsonDb, syncPersistentJsonDb } from '../db/db';
 import { DEFAULT_ACCOUNT, findAccountById, HARDCODED_ACCOUNTS, verifyAccountPin } from '../db/accounts';
+import { getSupabaseConfig, getSupabaseClient } from '../db/supabase';
+import { pullAllSupabaseToLocal, pushAllLocalToSupabase, initSupabaseRealtime } from '../db/supabaseSync';
 import type { AppSettings, Attendee, StaffRole, UserAccount } from '../types';
 
 interface Toast {
@@ -64,6 +66,11 @@ interface AppContextType {
   accountabilityTargetAccount: UserAccount | null;
   openAccountability: (account?: UserAccount) => void;
   closeAccountability: () => void;
+
+  // Cloud Database Sync (Supabase)
+  cloudSyncStatus: 'connected' | 'offline' | 'syncing' | 'unconfigured';
+  isCloudConnected: boolean;
+  syncWithCloud: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
@@ -138,18 +145,57 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
   };
 
+  const [cloudSyncStatus, setCloudSyncStatus] = useState<'connected' | 'offline' | 'syncing' | 'unconfigured'>(() => {
+    const cfg = getSupabaseConfig();
+    return cfg.enabled && cfg.url ? 'offline' : 'unconfigured';
+  });
+
+  const syncWithCloud = async () => {
+    const client = getSupabaseClient();
+    if (!client) {
+      showToast('warning', 'Supabase Cloud DB is not configured yet. Go to Sync & Backup to configure.', 'Cloud DB');
+      return;
+    }
+    setCloudSyncStatus('syncing');
+    showToast('info', 'Synchronizing with Cloud Database...', 'Cloud Sync');
+    try {
+      const pushRes = await pushAllLocalToSupabase();
+      const pullRes = await pullAllSupabaseToLocal();
+      if (pushRes.success && pullRes.success) {
+        setCloudSyncStatus('connected');
+        showToast('success', `Cloud sync complete! Pushed ${pushRes.attendeesPushed} and pulled ${pullRes.attendeesPulled} records.`, 'Synced');
+      } else {
+        showToast('warning', `Sync noticed: ${pushRes.message || pullRes.message}`);
+        setCloudSyncStatus('connected');
+      }
+    } catch (err: any) {
+      setCloudSyncStatus('offline');
+      showToast('error', `Cloud sync error: ${err.message || err}`);
+    }
+  };
+
   useEffect(() => {
     const handleOnline = () => {
       setIsOnline(true);
       showToast('info', 'Device is now ONLINE. Changes will sync if configured.', 'Online');
+      // Auto reconnect cloud if configured
+      const cfg = getSupabaseConfig();
+      if (cfg.enabled && cfg.url) {
+        pullAllSupabaseToLocal().then(res => {
+          if (res.success) setCloudSyncStatus('connected');
+        }).catch(() => {});
+      }
     };
     const handleOffline = () => {
       setIsOnline(false);
+      setCloudSyncStatus('offline');
       showToast('warning', 'Device is OFFLINE. Offline mode is active; all data is safely saved in local IndexedDB.', 'Offline Mode');
     };
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+
+    let unsubscribeRealtime: (() => void) | null = null;
 
     // Initial safe hydration from persistent JSON DB if IndexedDB is empty
     hydrateFromPersistentJsonDb().then(async (restored) => {
@@ -158,11 +204,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       await refreshSettings();
       await syncPersistentJsonDb();
+
+      // Connect to Supabase Cloud DB if credentials exist
+      const cfg = getSupabaseConfig();
+      if (cfg.enabled && cfg.url && cfg.anonKey) {
+        setCloudSyncStatus('syncing');
+        pullAllSupabaseToLocal().then(res => {
+          if (res.success) {
+            setCloudSyncStatus('connected');
+            unsubscribeRealtime = initSupabaseRealtime((table) => {
+              showToast('info', `Cloud update synced (${table})`, 'Live Sync');
+            });
+          } else {
+            setCloudSyncStatus('offline');
+          }
+        }).catch(() => {
+          setCloudSyncStatus('offline');
+        });
+      } else {
+        setCloudSyncStatus('unconfigured');
+      }
     });
 
     return () => {
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      if (unsubscribeRealtime) unsubscribeRealtime();
     };
   }, []);
 
@@ -287,7 +354,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         closeAccountability: () => {
           setIsAccountabilityOpen(false);
           setAccountabilityTargetAccount(null);
-        }
+        },
+        cloudSyncStatus,
+        isCloudConnected: cloudSyncStatus === 'connected',
+        syncWithCloud
       }}
     >
       {children}

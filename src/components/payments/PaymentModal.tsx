@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { db, computePaymentStatus, logAuditEvent, syncPersistentJsonDb } from '../../db/db';
+import { syncSinglePaymentToSupabase, syncSingleAttendeeToSupabase } from '../../db/supabaseSync';
 import type { Attendee, PaymentTransaction } from '../../types';
 
 interface PaymentModalProps {
@@ -102,6 +103,12 @@ export const PaymentModal: React.FC<PaymentModalProps> = ({ attendee, onClose })
 
       // Immediately sync to persistent JSON database in localStorage
       await syncPersistentJsonDb();
+
+      // Push real-time to Supabase cloud database if configured
+      syncSinglePaymentToSupabase(newTx).catch(console.warn);
+      db.attendees.get(attendee.id).then(updated => {
+        if (updated) syncSingleAttendeeToSupabase(updated).catch(console.warn);
+      }).catch(console.warn);
 
       showToast('success', `Payment of US$${paymentVal.toFixed(2)} recorded for ${attendee.fullName}`);
       setAmount('');

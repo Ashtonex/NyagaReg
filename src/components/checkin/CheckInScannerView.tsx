@@ -14,7 +14,8 @@ import {
   Phone 
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { db, parseQrVerificationToken, logAuditEvent } from '../../db/db';
+import { db, parseQrVerificationToken, logAuditEvent, syncPersistentJsonDb } from '../../db/db';
+import { syncSingleAttendeeToSupabase } from '../../db/supabaseSync';
 import type { Attendee } from '../../types';
 
 export const CheckInScannerView: React.FC = () => {
@@ -193,6 +194,10 @@ export const CheckInScannerView: React.FC = () => {
 
       // Refresh attendee
       const refreshed = await db.attendees.get(scannedAttendee.id);
+      await syncPersistentJsonDb();
+      if (refreshed) {
+        syncSingleAttendeeToSupabase(refreshed).catch(console.warn);
+      }
       setScannedAttendee(refreshed || null);
       setDuplicateAlert(false);
       setCheckInSuccess(true);
