@@ -125,24 +125,23 @@ export const AccountSwitcherModal: React.FC = () => {
           {/* PIN Entry Field */}
           <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-3">
             <div className="flex items-center justify-between">
-              <label className="text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center space-x-1.5">
+              <label className="block text-xs font-bold uppercase tracking-wider text-slate-700 flex items-center space-x-1.5 mb-1.5">
                 <Lock className="w-3.5 h-3.5 text-teal-600" />
-                <span>Enter 4-Digit Staff PIN for {targetAccount.displayName}</span>
+                <span>Enter Password for {targetAccount.displayName}</span>
               </label>
             </div>
 
             <div className="relative">
               <input
                 type="password"
-                maxLength={4}
                 value={pin}
                 onChange={e => {
                   setPin(e.target.value);
                   setErrorMsg('');
                 }}
-                placeholder="••••"
+                placeholder="Enter password"
                 autoFocus
-                className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-300 rounded-lg text-slate-900 font-mono text-center text-lg tracking-widest focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                className="w-full pl-10 pr-4 py-2.5 bg-white border border-slate-300 rounded-xl text-slate-900 font-mono text-center text-base focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-teal-500 shadow-2xs"
               />
               <KeyRound className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
             </div>
