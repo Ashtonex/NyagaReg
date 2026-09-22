@@ -209,18 +209,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const cfg = getSupabaseConfig();
       if (cfg.enabled && cfg.url && cfg.anonKey) {
         setCloudSyncStatus('syncing');
-        pullAllSupabaseToLocal().then(res => {
-          if (res.success) {
-            setCloudSyncStatus('connected');
-            unsubscribeRealtime = initSupabaseRealtime((table) => {
-              showToast('info', `Cloud update synced (${table})`, 'Live Sync');
+        // Push any existing local records (e.g. sales/registrations recorded before cloud connection)
+        pushAllLocalToSupabase()
+          .then(pushRes => {
+            if (pushRes.attendeesPushed > 0 || pushRes.paymentsPushed > 0) {
+              showToast('success', `Transferred ${pushRes.attendeesPushed} registration(s) and ${pushRes.paymentsPushed} payment(s) to Cloud DB!`, 'Cloud Synced');
+            }
+          })
+          .catch(err => console.warn('Push local to Supabase warning:', err))
+          .finally(() => {
+            pullAllSupabaseToLocal().then(res => {
+              if (res.success) {
+                setCloudSyncStatus('connected');
+                unsubscribeRealtime = initSupabaseRealtime((table) => {
+                  showToast('info', `Cloud update synced (${table})`, 'Live Sync');
+                });
+              } else {
+                setCloudSyncStatus('offline');
+              }
+            }).catch(() => {
+              setCloudSyncStatus('offline');
             });
-          } else {
-            setCloudSyncStatus('offline');
-          }
-        }).catch(() => {
-          setCloudSyncStatus('offline');
-        });
+          });
       } else {
         setCloudSyncStatus('unconfigured');
       }
